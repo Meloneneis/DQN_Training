@@ -61,7 +61,7 @@ def collect_real_data(num_samples=5000, seed=42):
 
 
 def training_step(policy_net, target_net, optimizer, replay_buffer, batch_size, gamma,
-                 device, use_mixed_precision, scaler=None, use_pinned_memory=False):
+                 device, use_mixed_precision, scaler=None, use_pinned_memory=False, use_bfloat16=False):
     """Perform one training step with or without mixed precision"""
 
     # Sample batch from replay buffer
@@ -80,24 +80,36 @@ def training_step(policy_net, target_net, optimizer, replay_buffer, batch_size, 
         next_obs_batch = torch.FloatTensor(next_obs_batch).to(device)
         done_batch = torch.FloatTensor(done_batch).to(device)
 
-    if use_mixed_precision and scaler is not None:
-        # Mixed precision training
-        with torch.cuda.amp.autocast():
-            # Compute Q(s, a)
+    if use_bfloat16:
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             q_values = policy_net(obs_batch)
             q_values = q_values.gather(1, act_batch.unsqueeze(1)).squeeze(1)
 
-            # Compute target Q values
             with torch.no_grad():
                 next_q_values = target_net(next_obs_batch)
                 next_q_values = next_q_values.max(1)[0]
                 next_q_values = next_q_values * (1 - done_batch)
                 target_q_values = rew_batch + gamma * next_q_values
 
-            # Compute loss
             loss = F.mse_loss(q_values, target_q_values)
 
-        # Backward pass with scaler
+        optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(policy_net.parameters(), 10.0)
+        optimizer.step()
+    elif use_mixed_precision and scaler is not None:
+        with torch.cuda.amp.autocast():
+            q_values = policy_net(obs_batch)
+            q_values = q_values.gather(1, act_batch.unsqueeze(1)).squeeze(1)
+
+            with torch.no_grad():
+                next_q_values = target_net(next_obs_batch)
+                next_q_values = next_q_values.max(1)[0]
+                next_q_values = next_q_values * (1 - done_batch)
+                target_q_values = rew_batch + gamma * next_q_values
+
+            loss = F.mse_loss(q_values, target_q_values)
+
         optimizer.zero_grad()
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
@@ -129,7 +141,7 @@ def training_step(policy_net, target_net, optimizer, replay_buffer, batch_size, 
     return loss.item()
 
 
-def benchmark_training(replay_buffer, num_steps=500, batch_size=256, use_mixed_precision=True, use_pinned_memory=False, use_tf32=False):
+def benchmark_training(replay_buffer, num_steps=500, batch_size=256, use_mixed_precision=True, use_pinned_memory=False, use_tf32=False, use_bfloat16=False):
     """Benchmark training with or without mixed precision"""
 
     # Check device
@@ -193,7 +205,7 @@ def benchmark_training(replay_buffer, num_steps=500, batch_size=256, use_mixed_p
     print("  Warming up...")
     for _ in range(10):
         _ = training_step(policy_net, target_net, optimizer, replay_buffer, batch_size,
-                         gamma, device, use_mixed_precision, scaler, use_pinned_memory)
+                         gamma, device, use_mixed_precision, scaler, use_pinned_memory, use_bfloat16)
 
     # Synchronize CUDA before timing
     if torch.cuda.is_available():
@@ -207,7 +219,7 @@ def benchmark_training(replay_buffer, num_steps=500, batch_size=256, use_mixed_p
 
     for step in range(num_steps):
         loss = training_step(policy_net, target_net, optimizer, replay_buffer, batch_size,
-                           gamma, device, use_mixed_precision, scaler, use_pinned_memory)
+                           gamma, device, use_mixed_precision, scaler, use_pinned_memory, use_bfloat16)
         losses.append(loss)
 
         if (step + 1) % 100 == 0:
@@ -294,10 +306,32 @@ def main():
         print("\nFP32 + Pinned + TF32:")
         print("-" * 70)
         time_fp32_all, losses_fp32_all = benchmark_training(
-            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=True, use_tf32=True
+            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=True, use_tf32=True, use_bfloat16=False
         )
         results[batch_size]['fp32_all'] = time_fp32_all
         print(f"  Total time: {time_fp32_all:.2f}s | Avg time/step: {time_fp32_all/num_steps*1000:.2f}ms")
+
+        time.sleep(1)
+
+        # Run BFloat16
+        print("\nBFloat16:")
+        print("-" * 70)
+        time_bf16, losses_bf16 = benchmark_training(
+            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=False, use_tf32=False, use_bfloat16=True
+        )
+        results[batch_size]['bf16'] = time_bf16
+        print(f"  Total time: {time_bf16:.2f}s | Avg time/step: {time_bf16/num_steps*1000:.2f}ms")
+
+        time.sleep(1)
+
+        # Run BFloat16 with all optimizations
+        print("\nBFloat16 + Pinned + TF32:")
+        print("-" * 70)
+        time_bf16_all, losses_bf16_all = benchmark_training(
+            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=True, use_tf32=True, use_bfloat16=True
+        )
+        results[batch_size]['bf16_all'] = time_bf16_all
+        print(f"  Total time: {time_bf16_all:.2f}s | Avg time/step: {time_bf16_all/num_steps*1000:.2f}ms")
 
         # Comparison for this batch size
         if torch.cuda.is_available():
@@ -305,26 +339,32 @@ def main():
             speedup_pinned = time_fp32 / time_fp32_pinned
             speedup_tf32 = time_fp32 / time_fp32_tf32
             speedup_all = time_fp32 / time_fp32_all
+            speedup_bf16 = time_fp32 / time_bf16
+            speedup_bf16_all = time_fp32 / time_bf16_all
             print(f"    + Pinned:             {speedup_pinned:.2f}x")
             print(f"    + TF32:               {speedup_tf32:.2f}x")
             print(f"    + Pinned + TF32:      {speedup_all:.2f}x")
+            print(f"    BFloat16:             {speedup_bf16:.2f}x")
+            print(f"    BF16 + Pin + TF32:    {speedup_bf16_all:.2f}x")
 
         print()
 
     # Summary table
-    print("\n" + "="*100)
+    print("\n" + "="*120)
     print("SUMMARY - Time per Training Step (milliseconds)")
-    print("="*100)
-    print(f"{'Batch':<10} {'FP32':<12} {'+Pinned':<12} {'+TF32':<12} {'+Both':<12} {'Best':<20}")
-    print("-" * 100)
+    print("="*120)
+    print(f"{'Batch':<8} {'FP32':<10} {'+Pin':<10} {'+TF32':<10} {'+Both':<10} {'BF16':<10} {'BF16+All':<12} {'Best':<25}")
+    print("-" * 120)
 
     for batch_size in batch_sizes:
         fp32_time = results[batch_size]['fp32'] / num_steps * 1000
         fp32_pinned_time = results[batch_size]['fp32_pinned'] / num_steps * 1000
         fp32_tf32_time = results[batch_size]['fp32_tf32'] / num_steps * 1000
         fp32_all_time = results[batch_size]['fp32_all'] / num_steps * 1000
+        bf16_time = results[batch_size]['bf16'] / num_steps * 1000
+        bf16_all_time = results[batch_size]['bf16_all'] / num_steps * 1000
 
-        best_time = min(fp32_time, fp32_pinned_time, fp32_tf32_time, fp32_all_time)
+        best_time = min(fp32_time, fp32_pinned_time, fp32_tf32_time, fp32_all_time, bf16_time, bf16_all_time)
         best_speedup = fp32_time / best_time
 
         if best_time == fp32_time:
@@ -333,12 +373,16 @@ def main():
             best_label = "FP32+Pinned"
         elif best_time == fp32_tf32_time:
             best_label = "FP32+TF32"
-        else:
+        elif best_time == fp32_all_time:
             best_label = "FP32+Pinned+TF32"
+        elif best_time == bf16_time:
+            best_label = "BFloat16"
+        else:
+            best_label = "BF16+Pinned+TF32"
 
-        print(f"{batch_size:<10} {fp32_time:<12.2f} {fp32_pinned_time:<12.2f} {fp32_tf32_time:<12.2f} {fp32_all_time:<12.2f} {best_label} ({best_speedup:.2f}x)")
+        print(f"{batch_size:<8} {fp32_time:<10.2f} {fp32_pinned_time:<10.2f} {fp32_tf32_time:<10.2f} {fp32_all_time:<10.2f} {bf16_time:<10.2f} {bf16_all_time:<12.2f} {best_label} ({best_speedup:.2f}x)")
 
-    print("="*100)
+    print("="*120)
 
 
 if __name__ == "__main__":
