@@ -200,6 +200,7 @@ def learn(env,
     if torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cudnn.benchmark = True
 
     if torch.cuda.is_available():
         print("\nUsing CUDA.")
@@ -237,28 +238,34 @@ def learn(env,
                                         cnn_channels=cnn_channels, cnn_kernels=cnn_kernels,
                                         cnn_strides=cnn_strides, final_spatial_size=final_spatial_size,
                                         activation=activation, normalization=normalization,
-                                        ).to(device)
+                                        ).to(device, memory_format=torch.channels_last)
         target_net = ContinuousActionDQN(action_dim, device, hidden_sizes=hidden_sizes,
                                         dropout_rate=dropout_rate,
                                         cnn_channels=cnn_channels, cnn_kernels=cnn_kernels,
                                         cnn_strides=cnn_strides, final_spatial_size=final_spatial_size,
                                         activation=activation, normalization=normalization,
-                                        ).to(device)
+                                        ).to(device, memory_format=torch.channels_last)
         print("\nUsing Continuous Action DQN (NAF)\n")
     else:
         policy_net = DQN(action_size, device, hidden_sizes=hidden_sizes, dropout_rate=dropout_rate,
                          cnn_channels=cnn_channels, cnn_kernels=cnn_kernels,
                          cnn_strides=cnn_strides, final_spatial_size=final_spatial_size,
                          activation=activation, normalization=normalization,
-                         use_dueling=use_dueling).to(device)
+                         use_dueling=use_dueling).to(device, memory_format=torch.channels_last)
         target_net = DQN(action_size, device, hidden_sizes=hidden_sizes, dropout_rate=dropout_rate,
                          cnn_channels=cnn_channels, cnn_kernels=cnn_kernels,
                          cnn_strides=cnn_strides, final_spatial_size=final_spatial_size,
                          activation=activation, normalization=normalization,
-                         use_dueling=use_dueling).to(device)
+                         use_dueling=use_dueling).to(device, memory_format=torch.channels_last)
         print(f"\nUsing Discrete Action DQN (Dueling: {use_dueling})\n")
     target_net.load_state_dict(policy_net.state_dict())
     target_net.eval()
+
+    # Compile models for faster execution (PyTorch 2.0+)
+    if hasattr(torch, 'compile'):
+        policy_net = torch.compile(policy_net)
+        target_net = torch.compile(target_net)
+        print("Models compiled with torch.compile()\n")
 
     # Create replay buffer
     replay_buffer = ReplayBuffer(buffer_size)

@@ -141,7 +141,7 @@ def training_step(policy_net, target_net, optimizer, replay_buffer, batch_size, 
     return loss.item()
 
 
-def benchmark_training(replay_buffer, num_steps=500, batch_size=256, use_mixed_precision=True, use_pinned_memory=False, use_tf32=False, use_bfloat16=False):
+def benchmark_training(replay_buffer, num_steps=500, batch_size=256, use_mixed_precision=True, use_pinned_memory=False, use_tf32=False, use_bfloat16=False, use_compile=False, use_channels_last=False, use_cudnn_benchmark=False):
     """Benchmark training with or without mixed precision"""
 
     # Check device
@@ -153,42 +153,81 @@ def benchmark_training(replay_buffer, num_steps=500, batch_size=256, use_mixed_p
         else:
             torch.backends.cuda.matmul.allow_tf32 = False
             torch.backends.cudnn.allow_tf32 = False
+
+        if use_cudnn_benchmark:
+            torch.backends.cudnn.benchmark = True
+        else:
+            torch.backends.cudnn.benchmark = False
     else:
         device = torch.device("cpu")
         print("WARNING: Using CPU - mixed precision requires CUDA for speedup")
 
     # Set up model (use actual DQN from your codebase)
     action_size = 9
-    policy_net = DQN(
-        action_size=action_size,
-        device=device,
-        hidden_sizes=[1024, 512],
-        dropout_rate=0.2,
-        cnn_channels=[32, 64, 128, 128],
-        cnn_kernels=[8, 4, 3, 3],
-        cnn_strides=[4, 2, 1, 1],
-        final_spatial_size=6,
-        activation='relu',
-        normalization='layer',
-        use_dueling=False
-    ).to(device)
 
-    target_net = DQN(
-        action_size=action_size,
-        device=device,
-        hidden_sizes=[1024, 512],
-        dropout_rate=0.2,
-        cnn_channels=[32, 64, 128, 128],
-        cnn_kernels=[8, 4, 3, 3],
-        cnn_strides=[4, 2, 1, 1],
-        final_spatial_size=6,
-        activation='relu',
-        normalization='layer',
-        use_dueling=False
-    ).to(device)
+    if use_channels_last:
+        policy_net = DQN(
+            action_size=action_size,
+            device=device,
+            hidden_sizes=[1024, 512],
+            dropout_rate=0.2,
+            cnn_channels=[32, 64, 128, 128],
+            cnn_kernels=[8, 4, 3, 3],
+            cnn_strides=[4, 2, 1, 1],
+            final_spatial_size=6,
+            activation='relu',
+            normalization='layer',
+            use_dueling=False
+        ).to(device, memory_format=torch.channels_last)
+
+        target_net = DQN(
+            action_size=action_size,
+            device=device,
+            hidden_sizes=[1024, 512],
+            dropout_rate=0.2,
+            cnn_channels=[32, 64, 128, 128],
+            cnn_kernels=[8, 4, 3, 3],
+            cnn_strides=[4, 2, 1, 1],
+            final_spatial_size=6,
+            activation='relu',
+            normalization='layer',
+            use_dueling=False
+        ).to(device, memory_format=torch.channels_last)
+    else:
+        policy_net = DQN(
+            action_size=action_size,
+            device=device,
+            hidden_sizes=[1024, 512],
+            dropout_rate=0.2,
+            cnn_channels=[32, 64, 128, 128],
+            cnn_kernels=[8, 4, 3, 3],
+            cnn_strides=[4, 2, 1, 1],
+            final_spatial_size=6,
+            activation='relu',
+            normalization='layer',
+            use_dueling=False
+        ).to(device)
+
+        target_net = DQN(
+            action_size=action_size,
+            device=device,
+            hidden_sizes=[1024, 512],
+            dropout_rate=0.2,
+            cnn_channels=[32, 64, 128, 128],
+            cnn_kernels=[8, 4, 3, 3],
+            cnn_strides=[4, 2, 1, 1],
+            final_spatial_size=6,
+            activation='relu',
+            normalization='layer',
+            use_dueling=False
+        ).to(device)
 
     target_net.load_state_dict(policy_net.state_dict())
     target_net.eval()
+
+    if use_compile and hasattr(torch, 'compile'):
+        policy_net = torch.compile(policy_net)
+        target_net = torch.compile(target_net)
 
     # Set up optimizer
     optimizer = optim.Adam(policy_net.parameters(), lr=1e-4)
@@ -273,7 +312,7 @@ def main():
         print("\nFP32 (Baseline):")
         print("-" * 70)
         time_fp32, losses_fp32 = benchmark_training(
-            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=False, use_tf32=False
+            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=False, use_tf32=False, use_bfloat16=False, use_compile=False, use_channels_last=False, use_cudnn_benchmark=False
         )
         results[batch_size]['fp32'] = time_fp32
         print(f"  Total time: {time_fp32:.2f}s | Avg time/step: {time_fp32/num_steps*1000:.2f}ms")
@@ -284,7 +323,7 @@ def main():
         print("\nFP32 + Pinned Memory:")
         print("-" * 70)
         time_fp32_pinned, losses_fp32_pinned = benchmark_training(
-            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=True, use_tf32=False
+            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=True, use_tf32=False, use_bfloat16=False, use_compile=False, use_channels_last=False, use_cudnn_benchmark=False
         )
         results[batch_size]['fp32_pinned'] = time_fp32_pinned
         print(f"  Total time: {time_fp32_pinned:.2f}s | Avg time/step: {time_fp32_pinned/num_steps*1000:.2f}ms")
@@ -295,7 +334,7 @@ def main():
         print("\nFP32 + TF32:")
         print("-" * 70)
         time_fp32_tf32, losses_fp32_tf32 = benchmark_training(
-            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=False, use_tf32=True
+            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=False, use_tf32=True, use_bfloat16=False, use_compile=False, use_channels_last=False, use_cudnn_benchmark=False
         )
         results[batch_size]['fp32_tf32'] = time_fp32_tf32
         print(f"  Total time: {time_fp32_tf32:.2f}s | Avg time/step: {time_fp32_tf32/num_steps*1000:.2f}ms")
@@ -306,7 +345,7 @@ def main():
         print("\nFP32 + Pinned + TF32:")
         print("-" * 70)
         time_fp32_all, losses_fp32_all = benchmark_training(
-            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=True, use_tf32=True, use_bfloat16=False
+            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=True, use_tf32=True, use_bfloat16=False, use_compile=False, use_channels_last=False, use_cudnn_benchmark=False
         )
         results[batch_size]['fp32_all'] = time_fp32_all
         print(f"  Total time: {time_fp32_all:.2f}s | Avg time/step: {time_fp32_all/num_steps*1000:.2f}ms")
@@ -317,7 +356,7 @@ def main():
         print("\nBFloat16:")
         print("-" * 70)
         time_bf16, losses_bf16 = benchmark_training(
-            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=False, use_tf32=False, use_bfloat16=True
+            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=False, use_tf32=False, use_bfloat16=True, use_compile=False, use_channels_last=False, use_cudnn_benchmark=False
         )
         results[batch_size]['bf16'] = time_bf16
         print(f"  Total time: {time_bf16:.2f}s | Avg time/step: {time_bf16/num_steps*1000:.2f}ms")
@@ -328,10 +367,21 @@ def main():
         print("\nBFloat16 + Pinned + TF32:")
         print("-" * 70)
         time_bf16_all, losses_bf16_all = benchmark_training(
-            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=True, use_tf32=True, use_bfloat16=True
+            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=True, use_tf32=True, use_bfloat16=True, use_compile=False, use_channels_last=False, use_cudnn_benchmark=False
         )
         results[batch_size]['bf16_all'] = time_bf16_all
         print(f"  Total time: {time_bf16_all:.2f}s | Avg time/step: {time_bf16_all/num_steps*1000:.2f}ms")
+
+        time.sleep(1)
+
+        # Run with ALL optimizations
+        print("\nALL OPTIMIZATIONS (Pinned + TF32 + Compile + Channels Last + cuDNN):")
+        print("-" * 70)
+        time_full, losses_full = benchmark_training(
+            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=True, use_tf32=True, use_bfloat16=False, use_compile=True, use_channels_last=True, use_cudnn_benchmark=True
+        )
+        results[batch_size]['full'] = time_full
+        print(f"  Total time: {time_full:.2f}s | Avg time/step: {time_full/num_steps*1000:.2f}ms")
 
         # Comparison for this batch size
         if torch.cuda.is_available():
@@ -341,20 +391,22 @@ def main():
             speedup_all = time_fp32 / time_fp32_all
             speedup_bf16 = time_fp32 / time_bf16
             speedup_bf16_all = time_fp32 / time_bf16_all
+            speedup_full = time_fp32 / time_full
             print(f"    + Pinned:             {speedup_pinned:.2f}x")
             print(f"    + TF32:               {speedup_tf32:.2f}x")
             print(f"    + Pinned + TF32:      {speedup_all:.2f}x")
             print(f"    BFloat16:             {speedup_bf16:.2f}x")
             print(f"    BF16 + Pin + TF32:    {speedup_bf16_all:.2f}x")
+            print(f"    ALL OPTIMIZATIONS:    {speedup_full:.2f}x")
 
         print()
 
     # Summary table
-    print("\n" + "="*120)
+    print("\n" + "="*130)
     print("SUMMARY - Time per Training Step (milliseconds)")
-    print("="*120)
-    print(f"{'Batch':<8} {'FP32':<10} {'+Pin':<10} {'+TF32':<10} {'+Both':<10} {'BF16':<10} {'BF16+All':<12} {'Best':<25}")
-    print("-" * 120)
+    print("="*130)
+    print(f"{'Batch':<8} {'FP32':<10} {'+Pin':<10} {'+TF32':<10} {'+Both':<10} {'BF16':<10} {'BF16+All':<12} {'FULL OPT':<12} {'Best':<25}")
+    print("-" * 130)
 
     for batch_size in batch_sizes:
         fp32_time = results[batch_size]['fp32'] / num_steps * 1000
@@ -363,8 +415,9 @@ def main():
         fp32_all_time = results[batch_size]['fp32_all'] / num_steps * 1000
         bf16_time = results[batch_size]['bf16'] / num_steps * 1000
         bf16_all_time = results[batch_size]['bf16_all'] / num_steps * 1000
+        full_time = results[batch_size]['full'] / num_steps * 1000
 
-        best_time = min(fp32_time, fp32_pinned_time, fp32_tf32_time, fp32_all_time, bf16_time, bf16_all_time)
+        best_time = min(fp32_time, fp32_pinned_time, fp32_tf32_time, fp32_all_time, bf16_time, bf16_all_time, full_time)
         best_speedup = fp32_time / best_time
 
         if best_time == fp32_time:
@@ -377,12 +430,14 @@ def main():
             best_label = "FP32+Pinned+TF32"
         elif best_time == bf16_time:
             best_label = "BFloat16"
-        else:
+        elif best_time == bf16_all_time:
             best_label = "BF16+Pinned+TF32"
+        else:
+            best_label = "FULL OPTIMIZATIONS"
 
-        print(f"{batch_size:<8} {fp32_time:<10.2f} {fp32_pinned_time:<10.2f} {fp32_tf32_time:<10.2f} {fp32_all_time:<10.2f} {bf16_time:<10.2f} {bf16_all_time:<12.2f} {best_label} ({best_speedup:.2f}x)")
+        print(f"{batch_size:<8} {fp32_time:<10.2f} {fp32_pinned_time:<10.2f} {fp32_tf32_time:<10.2f} {fp32_all_time:<10.2f} {bf16_time:<10.2f} {bf16_all_time:<12.2f} {full_time:<12.2f} {best_label} ({best_speedup:.2f}x)")
 
-    print("="*120)
+    print("="*130)
 
 
 if __name__ == "__main__":
