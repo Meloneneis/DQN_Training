@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-def perform_qlearning_step(policy_net, target_net, optimizer, replay_buffer, batch_size, gamma, device, use_doubleqlearning=False, grad_clip=None):
+def perform_qlearning_step(policy_net, target_net, optimizer, replay_buffer, batch_size, gamma, device, use_doubleqlearning=False, grad_clip=None, scaler=None):
     """ Perform a deep Q-learning step
     Parameters
     -------
@@ -54,41 +54,59 @@ def perform_qlearning_step(policy_net, target_net, optimizer, replay_buffer, bat
     next_obs_batch = torch.FloatTensor(next_obs_batch).to(device)
     done_batch = torch.FloatTensor(done_batch).to(device)
     
-    # Step 2
-    q_values = policy_net(obs_batch)
-    q_values = q_values.gather(1, act_batch.unsqueeze(1)).squeeze(1)
-    
-    # Step 3
-    with torch.no_grad():
-        if use_doubleqlearning:
-            # Double Q-Learning
-            next_q_values_policy = policy_net(next_obs_batch)
-            next_actions = next_q_values_policy.max(1)[1]
-            
-            next_q_values_target = target_net(next_obs_batch)
-            next_q_values = next_q_values_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)
-        else:
-            # Standard DQN
-            next_q_values_target = target_net(next_obs_batch)
-            next_q_values = next_q_values_target.max(1)[0]
-        
-        # Step 4
-        next_q_values = next_q_values * (1 - done_batch)
-        
-        # Step 5
-        target_q_values = rew_batch + gamma * next_q_values
-    
-    # Step 6
-    loss = F.mse_loss(q_values, target_q_values)
-    
-    # Step 7 & 8
-    optimizer.zero_grad()
-    loss.backward()
-    if grad_clip is not None:
-        torch.nn.utils.clip_grad_norm_(policy_net.parameters(), grad_clip)
+    if scaler is not None:
+        with torch.cuda.amp.autocast():
+            q_values = policy_net(obs_batch)
+            q_values = q_values.gather(1, act_batch.unsqueeze(1)).squeeze(1)
 
-    # Step 9
-    optimizer.step()
+            with torch.no_grad():
+                if use_doubleqlearning:
+                    next_q_values_policy = policy_net(next_obs_batch)
+                    next_actions = next_q_values_policy.max(1)[1]
+
+                    next_q_values_target = target_net(next_obs_batch)
+                    next_q_values = next_q_values_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)
+                else:
+                    next_q_values_target = target_net(next_obs_batch)
+                    next_q_values = next_q_values_target.max(1)[0]
+
+                next_q_values = next_q_values * (1 - done_batch)
+                target_q_values = rew_batch + gamma * next_q_values
+
+            loss = F.mse_loss(q_values, target_q_values)
+
+        optimizer.zero_grad()
+        scaler.scale(loss).backward()
+        if grad_clip is not None:
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(policy_net.parameters(), grad_clip)
+        scaler.step(optimizer)
+        scaler.update()
+    else:
+        q_values = policy_net(obs_batch)
+        q_values = q_values.gather(1, act_batch.unsqueeze(1)).squeeze(1)
+
+        with torch.no_grad():
+            if use_doubleqlearning:
+                next_q_values_policy = policy_net(next_obs_batch)
+                next_actions = next_q_values_policy.max(1)[1]
+
+                next_q_values_target = target_net(next_obs_batch)
+                next_q_values = next_q_values_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)
+            else:
+                next_q_values_target = target_net(next_obs_batch)
+                next_q_values = next_q_values_target.max(1)[0]
+
+            next_q_values = next_q_values * (1 - done_batch)
+            target_q_values = rew_batch + gamma * next_q_values
+
+        loss = F.mse_loss(q_values, target_q_values)
+
+        optimizer.zero_grad()
+        loss.backward()
+        if grad_clip is not None:
+            torch.nn.utils.clip_grad_norm_(policy_net.parameters(), grad_clip)
+        optimizer.step()
     
     return loss.item()
 
@@ -115,7 +133,7 @@ def update_target_net(policy_net, target_net, tau=None):
 
 
 def perform_qlearning_step_continuous(policy_net, target_net, optimizer, replay_buffer,
-                                     batch_size, gamma, device, use_doubleqlearning=False, grad_clip=None):
+                                     batch_size, gamma, device, use_doubleqlearning=False, grad_clip=None, scaler=None):
     """Q-learning step for continuous actions using NAF
 
     Parameters
@@ -133,28 +151,52 @@ def perform_qlearning_step_continuous(policy_net, target_net, optimizer, replay_
     next_obs_batch = torch.FloatTensor(next_obs_batch).to(device)
     done_batch = torch.FloatTensor(done_batch).to(device)
 
-    q_values, _ = policy_net(obs_batch, act_batch)
+    if scaler is not None:
+        with torch.cuda.amp.autocast():
+            q_values, _ = policy_net(obs_batch, act_batch)
 
-    with torch.no_grad():
+            with torch.no_grad():
+                next_actions = target_net(next_obs_batch)
 
-        next_actions = target_net(next_obs_batch)
+                if use_doubleqlearning:
+                    next_actions_policy = policy_net(next_obs_batch)
+                    next_q_values, _ = target_net(next_obs_batch, next_actions_policy)
+                else:
+                    next_q_values, _ = target_net(next_obs_batch, next_actions)
 
-        if use_doubleqlearning:
-            next_actions_policy = policy_net(next_obs_batch)
-            next_q_values, _ = target_net(next_obs_batch, next_actions_policy)
-        else:
-            next_q_values, _ = target_net(next_obs_batch, next_actions)
+                next_q_values = next_q_values * (1 - done_batch)
+                target_q_values = rew_batch + gamma * next_q_values
 
-        next_q_values = next_q_values * (1 - done_batch)
+            loss = F.mse_loss(q_values, target_q_values)
 
-        target_q_values = rew_batch + gamma * next_q_values
+        optimizer.zero_grad()
+        scaler.scale(loss).backward()
+        if grad_clip is not None:
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(policy_net.parameters(), grad_clip)
+        scaler.step(optimizer)
+        scaler.update()
+    else:
+        q_values, _ = policy_net(obs_batch, act_batch)
 
-    loss = F.mse_loss(q_values, target_q_values)
+        with torch.no_grad():
+            next_actions = target_net(next_obs_batch)
 
-    optimizer.zero_grad()
-    loss.backward()
-    if grad_clip is not None:
-        torch.nn.utils.clip_grad_norm_(policy_net.parameters(), grad_clip)
-    optimizer.step()
+            if use_doubleqlearning:
+                next_actions_policy = policy_net(next_obs_batch)
+                next_q_values, _ = target_net(next_obs_batch, next_actions_policy)
+            else:
+                next_q_values, _ = target_net(next_obs_batch, next_actions)
+
+            next_q_values = next_q_values * (1 - done_batch)
+            target_q_values = rew_batch + gamma * next_q_values
+
+        loss = F.mse_loss(q_values, target_q_values)
+
+        optimizer.zero_grad()
+        loss.backward()
+        if grad_clip is not None:
+            torch.nn.utils.clip_grad_norm_(policy_net.parameters(), grad_clip)
+        optimizer.step()
 
     return loss.item()

@@ -107,7 +107,8 @@ def learn(env,
           normalization='layer',
           lr_scheduler='none',
           weight_decay=0.0,
-          use_dueling=False):
+          use_dueling=False,
+          use_mixed_precision=True):
     """ Train a deep q-learning model.
     Parameters
     -------
@@ -163,7 +164,6 @@ def learn(env,
         )
         """)
 
-    # Log hyperparameters to wandb
     if use_wandb:
         wandb.config.update({
             'lr': lr,
@@ -286,7 +286,13 @@ def learn(env,
     print(f"FC layer architecture: {hidden_sizes}")
     print(f"Dropout rate: {dropout_rate}")
     print(f"Normalization type: {normalization}")
+    print(f"Mixed precision: {use_mixed_precision}")
     print()
+
+    scaler = None
+    if use_mixed_precision and torch.cuda.is_available():
+        scaler = torch.cuda.amp.GradScaler()
+        print("Mixed precision training enabled\n")
 
     # Create the schedule for exploration starting from 1.
     exploration = LinearSchedule(schedule_timesteps=int(exploration_fraction * total_timesteps),
@@ -361,14 +367,12 @@ def learn(env,
             episode_rewards.append(0.0)
 
         if t > learning_starts and t % train_freq == 0:
-            # Minimize the error in Bellman's equation on a batch sampled from replay buffer.
             if use_continuous_actions:
-                loss = perform_qlearning_step_continuous(policy_net, target_net, optimizer, replay_buffer, batch_size, gamma, device, use_doubleqlearning, grad_clip=10.0)
+                loss = perform_qlearning_step_continuous(policy_net, target_net, optimizer, replay_buffer, batch_size, gamma, device, use_doubleqlearning, grad_clip=10.0, scaler=scaler)
             else:
-                loss = perform_qlearning_step(policy_net, target_net, optimizer, replay_buffer, batch_size, gamma, device, use_doubleqlearning, grad_clip=10.0)
+                loss = perform_qlearning_step(policy_net, target_net, optimizer, replay_buffer, batch_size, gamma, device, use_doubleqlearning, grad_clip=10.0, scaler=scaler)
             training_losses.append(loss)
 
-            # Step the learning rate scheduler
             if scheduler is not None:
                 scheduler.step()
 
