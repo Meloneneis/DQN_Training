@@ -61,17 +61,24 @@ def collect_real_data(num_samples=5000, seed=42):
 
 
 def training_step(policy_net, target_net, optimizer, replay_buffer, batch_size, gamma,
-                 device, use_mixed_precision, scaler=None):
+                 device, use_mixed_precision, scaler=None, use_pinned_memory=False):
     """Perform one training step with or without mixed precision"""
 
     # Sample batch from replay buffer
     obs_batch, act_batch, rew_batch, next_obs_batch, done_batch = replay_buffer.sample(batch_size)
 
-    obs_batch = torch.FloatTensor(obs_batch).to(device)
-    act_batch = torch.LongTensor(act_batch).to(device)
-    rew_batch = torch.FloatTensor(rew_batch).to(device)
-    next_obs_batch = torch.FloatTensor(next_obs_batch).to(device)
-    done_batch = torch.FloatTensor(done_batch).to(device)
+    if use_pinned_memory:
+        obs_batch = torch.FloatTensor(obs_batch).pin_memory().to(device, non_blocking=True)
+        act_batch = torch.LongTensor(act_batch).pin_memory().to(device, non_blocking=True)
+        rew_batch = torch.FloatTensor(rew_batch).pin_memory().to(device, non_blocking=True)
+        next_obs_batch = torch.FloatTensor(next_obs_batch).pin_memory().to(device, non_blocking=True)
+        done_batch = torch.FloatTensor(done_batch).pin_memory().to(device, non_blocking=True)
+    else:
+        obs_batch = torch.FloatTensor(obs_batch).to(device)
+        act_batch = torch.LongTensor(act_batch).to(device)
+        rew_batch = torch.FloatTensor(rew_batch).to(device)
+        next_obs_batch = torch.FloatTensor(next_obs_batch).to(device)
+        done_batch = torch.FloatTensor(done_batch).to(device)
 
     if use_mixed_precision and scaler is not None:
         # Mixed precision training
@@ -122,7 +129,7 @@ def training_step(policy_net, target_net, optimizer, replay_buffer, batch_size, 
     return loss.item()
 
 
-def benchmark_training(replay_buffer, num_steps=500, batch_size=256, use_mixed_precision=True):
+def benchmark_training(replay_buffer, num_steps=500, batch_size=256, use_mixed_precision=True, use_pinned_memory=False):
     """Benchmark training with or without mixed precision"""
 
     # Check device
@@ -180,7 +187,7 @@ def benchmark_training(replay_buffer, num_steps=500, batch_size=256, use_mixed_p
     print("  Warming up...")
     for _ in range(10):
         _ = training_step(policy_net, target_net, optimizer, replay_buffer, batch_size,
-                         gamma, device, use_mixed_precision, scaler)
+                         gamma, device, use_mixed_precision, scaler, use_pinned_memory)
 
     # Synchronize CUDA before timing
     if torch.cuda.is_available():
@@ -194,7 +201,7 @@ def benchmark_training(replay_buffer, num_steps=500, batch_size=256, use_mixed_p
 
     for step in range(num_steps):
         loss = training_step(policy_net, target_net, optimizer, replay_buffer, batch_size,
-                           gamma, device, use_mixed_precision, scaler)
+                           gamma, device, use_mixed_precision, scaler, use_pinned_memory)
         losses.append(loss)
 
         if (step + 1) % 100 == 0:
@@ -248,53 +255,84 @@ def main():
         print("\nFP32 (Standard Precision):")
         print("-" * 70)
         time_fp32, losses_fp32 = benchmark_training(
-            replay_buffer, num_steps, batch_size, use_mixed_precision=False
+            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=False
         )
         results[batch_size]['fp32'] = time_fp32
         print(f"  Total time: {time_fp32:.2f}s | Avg time/step: {time_fp32/num_steps*1000:.2f}ms")
 
-        # Small break
+        time.sleep(1)
+
+        # Run FP32 with pinned memory
+        print("\nFP32 + Pinned Memory:")
+        print("-" * 70)
+        time_fp32_pinned, losses_fp32_pinned = benchmark_training(
+            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=True
+        )
+        results[batch_size]['fp32_pinned'] = time_fp32_pinned
+        print(f"  Total time: {time_fp32_pinned:.2f}s | Avg time/step: {time_fp32_pinned/num_steps*1000:.2f}ms")
+
         time.sleep(1)
 
         # Run mixed precision benchmark
         print("\nMixed Precision:")
         print("-" * 70)
         time_mixed, losses_mixed = benchmark_training(
-            replay_buffer, num_steps, batch_size, use_mixed_precision=True
+            replay_buffer, num_steps, batch_size, use_mixed_precision=True, use_pinned_memory=False
         )
         results[batch_size]['mixed'] = time_mixed
         print(f"  Total time: {time_mixed:.2f}s | Avg time/step: {time_mixed/num_steps*1000:.2f}ms")
 
+        time.sleep(1)
+
+        # Run mixed precision with pinned memory
+        print("\nMixed Precision + Pinned Memory:")
+        print("-" * 70)
+        time_mixed_pinned, losses_mixed_pinned = benchmark_training(
+            replay_buffer, num_steps, batch_size, use_mixed_precision=True, use_pinned_memory=True
+        )
+        results[batch_size]['mixed_pinned'] = time_mixed_pinned
+        print(f"  Total time: {time_mixed_pinned:.2f}s | Avg time/step: {time_mixed_pinned/num_steps*1000:.2f}ms")
+
         # Comparison for this batch size
         if torch.cuda.is_available():
-            speedup = time_fp32 / time_mixed
-            time_saved = time_fp32 - time_mixed
-            print(f"\n  Speedup: {speedup:.2f}x | Time saved: {time_saved:.2f}s ({time_saved/time_fp32*100:.1f}%)")
+            print("\n  Comparisons vs FP32 baseline:")
+            speedup_pinned = time_fp32 / time_fp32_pinned
+            speedup_mixed = time_fp32 / time_mixed
+            speedup_mixed_pinned = time_fp32 / time_mixed_pinned
+            print(f"    FP32 + Pinned:        {speedup_pinned:.2f}x")
+            print(f"    Mixed Precision:      {speedup_mixed:.2f}x")
+            print(f"    Mixed + Pinned:       {speedup_mixed_pinned:.2f}x")
 
         print()
 
     # Summary table
-    print("\n" + "="*70)
+    print("\n" + "="*90)
     print("SUMMARY - Time per Training Step (milliseconds)")
-    print("="*70)
-    print(f"{'Batch Size':<15} {'FP32 (ms)':<15} {'Mixed (ms)':<15} {'Speedup':<15}")
-    print("-" * 70)
+    print("="*90)
+    print(f"{'Batch':<10} {'FP32':<12} {'FP32+Pin':<12} {'Mixed':<12} {'Mixed+Pin':<12} {'Best':<15}")
+    print("-" * 90)
 
     for batch_size in batch_sizes:
         fp32_time = results[batch_size]['fp32'] / num_steps * 1000
+        fp32_pinned_time = results[batch_size]['fp32_pinned'] / num_steps * 1000
         mixed_time = results[batch_size]['mixed'] / num_steps * 1000
-        speedup = results[batch_size]['fp32'] / results[batch_size]['mixed']
+        mixed_pinned_time = results[batch_size]['mixed_pinned'] / num_steps * 1000
 
-        print(f"{batch_size:<15} {fp32_time:<15.2f} {mixed_time:<15.2f} {speedup:<15.2f}x")
+        best_time = min(fp32_time, fp32_pinned_time, mixed_time, mixed_pinned_time)
+        best_speedup = fp32_time / best_time
 
-    print("="*70)
+        if best_time == fp32_time:
+            best_label = "FP32"
+        elif best_time == fp32_pinned_time:
+            best_label = "FP32+Pin"
+        elif best_time == mixed_time:
+            best_label = "Mixed"
+        else:
+            best_label = "Mixed+Pin"
 
-    # Best configuration
-    if torch.cuda.is_available():
-        best_batch = max(batch_sizes, key=lambda bs: results[bs]['fp32'] / results[bs]['mixed'])
-        best_speedup = results[best_batch]['fp32'] / results[best_batch]['mixed']
-        print(f"\nBest speedup: {best_speedup:.2f}x with batch size {best_batch}")
-        print("="*70)
+        print(f"{batch_size:<10} {fp32_time:<12.2f} {fp32_pinned_time:<12.2f} {mixed_time:<12.2f} {mixed_pinned_time:<12.2f} {best_label} ({best_speedup:.2f}x)")
+
+    print("="*90)
 
 
 if __name__ == "__main__":
