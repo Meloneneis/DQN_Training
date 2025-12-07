@@ -107,8 +107,7 @@ def learn(env,
           normalization='layer',
           lr_scheduler='none',
           weight_decay=0.0,
-          use_dueling=False,
-          use_mixed_precision=True):
+          use_dueling=False):
     """ Train a deep q-learning model.
     Parameters
     -------
@@ -196,11 +195,10 @@ def learn(env,
     # set float as default
     torch.set_default_dtype (torch.float32)
 
-    # Enable TF32 for faster matmul on Ampere+ GPUs
+    # Enable performance optimizations
     if torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
-        torch.backends.cudnn.benchmark = True
 
     if torch.cuda.is_available():
         print("\nUsing CUDA.")
@@ -238,34 +236,28 @@ def learn(env,
                                         cnn_channels=cnn_channels, cnn_kernels=cnn_kernels,
                                         cnn_strides=cnn_strides, final_spatial_size=final_spatial_size,
                                         activation=activation, normalization=normalization,
-                                        ).to(device, memory_format=torch.channels_last)
+                                        ).to(device)
         target_net = ContinuousActionDQN(action_dim, device, hidden_sizes=hidden_sizes,
                                         dropout_rate=dropout_rate,
                                         cnn_channels=cnn_channels, cnn_kernels=cnn_kernels,
                                         cnn_strides=cnn_strides, final_spatial_size=final_spatial_size,
                                         activation=activation, normalization=normalization,
-                                        ).to(device, memory_format=torch.channels_last)
+                                        ).to(device)
         print("\nUsing Continuous Action DQN (NAF)\n")
     else:
         policy_net = DQN(action_size, device, hidden_sizes=hidden_sizes, dropout_rate=dropout_rate,
                          cnn_channels=cnn_channels, cnn_kernels=cnn_kernels,
                          cnn_strides=cnn_strides, final_spatial_size=final_spatial_size,
                          activation=activation, normalization=normalization,
-                         use_dueling=use_dueling).to(device, memory_format=torch.channels_last)
+                         use_dueling=use_dueling).to(device)
         target_net = DQN(action_size, device, hidden_sizes=hidden_sizes, dropout_rate=dropout_rate,
                          cnn_channels=cnn_channels, cnn_kernels=cnn_kernels,
                          cnn_strides=cnn_strides, final_spatial_size=final_spatial_size,
                          activation=activation, normalization=normalization,
-                         use_dueling=use_dueling).to(device, memory_format=torch.channels_last)
+                         use_dueling=use_dueling).to(device)
         print(f"\nUsing Discrete Action DQN (Dueling: {use_dueling})\n")
     target_net.load_state_dict(policy_net.state_dict())
     target_net.eval()
-
-    # Note: torch.compile() disabled due to compatibility issues with PyTorch 2.0.1 + CUDA 11.7
-    # if hasattr(torch, 'compile'):
-    #     policy_net = torch.compile(policy_net)
-    #     target_net = torch.compile(target_net)
-    #     print("Models compiled with torch.compile()\n")
 
     # Create replay buffer
     replay_buffer = ReplayBuffer(buffer_size)
@@ -298,13 +290,7 @@ def learn(env,
     print(f"FC layer architecture: {hidden_sizes}")
     print(f"Dropout rate: {dropout_rate}")
     print(f"Normalization type: {normalization}")
-    print(f"Mixed precision: {use_mixed_precision}")
     print()
-
-    scaler = None
-    if use_mixed_precision and torch.cuda.is_available():
-        scaler = torch.cuda.amp.GradScaler()
-        print("Mixed precision training enabled\n")
 
     # Create the schedule for exploration starting from 1.
     exploration = LinearSchedule(schedule_timesteps=int(exploration_fraction * total_timesteps),
@@ -380,9 +366,9 @@ def learn(env,
 
         if t > learning_starts and t % train_freq == 0:
             if use_continuous_actions:
-                loss = perform_qlearning_step_continuous(policy_net, target_net, optimizer, replay_buffer, batch_size, gamma, device, use_doubleqlearning, grad_clip=10.0, scaler=scaler)
+                loss = perform_qlearning_step_continuous(policy_net, target_net, optimizer, replay_buffer, batch_size, gamma, device, use_doubleqlearning, grad_clip=10.0)
             else:
-                loss = perform_qlearning_step(policy_net, target_net, optimizer, replay_buffer, batch_size, gamma, device, use_doubleqlearning, grad_clip=10.0, scaler=scaler)
+                loss = perform_qlearning_step(policy_net, target_net, optimizer, replay_buffer, batch_size, gamma, device, use_doubleqlearning, grad_clip=10.0)
             training_losses.append(loss)
 
             if scheduler is not None:
