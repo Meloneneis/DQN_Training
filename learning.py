@@ -47,12 +47,12 @@ def perform_qlearning_step(policy_net, target_net, optimizer, replay_buffer, bat
 
     # Step 1
     obs_batch, act_batch, rew_batch, next_obs_batch, done_batch = replay_buffer.sample(batch_size)
-    
-    obs_batch = torch.FloatTensor(obs_batch).to(device)
-    act_batch = torch.LongTensor(act_batch).to(device)
-    rew_batch = torch.FloatTensor(rew_batch).to(device)
-    next_obs_batch = torch.FloatTensor(next_obs_batch).to(device)
-    done_batch = torch.FloatTensor(done_batch).to(device)
+
+    obs_batch = torch.FloatTensor(obs_batch).pin_memory().to(device, non_blocking=True)
+    act_batch = torch.LongTensor(act_batch).pin_memory().to(device, non_blocking=True)
+    rew_batch = torch.FloatTensor(rew_batch).pin_memory().to(device, non_blocking=True)
+    next_obs_batch = torch.FloatTensor(next_obs_batch).pin_memory().to(device, non_blocking=True)
+    done_batch = torch.FloatTensor(done_batch).pin_memory().to(device, non_blocking=True)
     
     if scaler is not None:
         with torch.cuda.amp.autocast():
@@ -145,11 +145,11 @@ def perform_qlearning_step_continuous(policy_net, target_net, optimizer, replay_
     obs_batch, act_batch, rew_batch, next_obs_batch, done_batch = \
         replay_buffer.sample(batch_size)
 
-    obs_batch = torch.FloatTensor(obs_batch).to(device)
-    act_batch = torch.FloatTensor(act_batch).to(device)
-    rew_batch = torch.FloatTensor(rew_batch).to(device)
-    next_obs_batch = torch.FloatTensor(next_obs_batch).to(device)
-    done_batch = torch.FloatTensor(done_batch).to(device)
+    obs_batch = torch.FloatTensor(obs_batch).pin_memory().to(device, non_blocking=True)
+    act_batch = torch.FloatTensor(act_batch).pin_memory().to(device, non_blocking=True)
+    rew_batch = torch.FloatTensor(rew_batch).pin_memory().to(device, non_blocking=True)
+    next_obs_batch = torch.FloatTensor(next_obs_batch).pin_memory().to(device, non_blocking=True)
+    done_batch = torch.FloatTensor(done_batch).pin_memory().to(device, non_blocking=True)
 
     if scaler is not None:
         with torch.cuda.amp.autocast():

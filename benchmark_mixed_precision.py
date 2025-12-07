@@ -129,12 +129,18 @@ def training_step(policy_net, target_net, optimizer, replay_buffer, batch_size, 
     return loss.item()
 
 
-def benchmark_training(replay_buffer, num_steps=500, batch_size=256, use_mixed_precision=True, use_pinned_memory=False):
+def benchmark_training(replay_buffer, num_steps=500, batch_size=256, use_mixed_precision=True, use_pinned_memory=False, use_tf32=False):
     """Benchmark training with or without mixed precision"""
 
     # Check device
     if torch.cuda.is_available():
         device = torch.device("cuda")
+        if use_tf32:
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+        else:
+            torch.backends.cuda.matmul.allow_tf32 = False
+            torch.backends.cudnn.allow_tf32 = False
     else:
         device = torch.device("cpu")
         print("WARNING: Using CPU - mixed precision requires CUDA for speedup")
@@ -252,10 +258,10 @@ def main():
         results[batch_size] = {}
 
         # Run FP32 benchmark
-        print("\nFP32 (Standard Precision):")
+        print("\nFP32 (Baseline):")
         print("-" * 70)
         time_fp32, losses_fp32 = benchmark_training(
-            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=False
+            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=False, use_tf32=False
         )
         results[batch_size]['fp32'] = time_fp32
         print(f"  Total time: {time_fp32:.2f}s | Avg time/step: {time_fp32/num_steps*1000:.2f}ms")
@@ -266,73 +272,73 @@ def main():
         print("\nFP32 + Pinned Memory:")
         print("-" * 70)
         time_fp32_pinned, losses_fp32_pinned = benchmark_training(
-            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=True
+            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=True, use_tf32=False
         )
         results[batch_size]['fp32_pinned'] = time_fp32_pinned
         print(f"  Total time: {time_fp32_pinned:.2f}s | Avg time/step: {time_fp32_pinned/num_steps*1000:.2f}ms")
 
         time.sleep(1)
 
-        # Run mixed precision benchmark
-        print("\nMixed Precision:")
+        # Run FP32 with TF32
+        print("\nFP32 + TF32:")
         print("-" * 70)
-        time_mixed, losses_mixed = benchmark_training(
-            replay_buffer, num_steps, batch_size, use_mixed_precision=True, use_pinned_memory=False
+        time_fp32_tf32, losses_fp32_tf32 = benchmark_training(
+            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=False, use_tf32=True
         )
-        results[batch_size]['mixed'] = time_mixed
-        print(f"  Total time: {time_mixed:.2f}s | Avg time/step: {time_mixed/num_steps*1000:.2f}ms")
+        results[batch_size]['fp32_tf32'] = time_fp32_tf32
+        print(f"  Total time: {time_fp32_tf32:.2f}s | Avg time/step: {time_fp32_tf32/num_steps*1000:.2f}ms")
 
         time.sleep(1)
 
-        # Run mixed precision with pinned memory
-        print("\nMixed Precision + Pinned Memory:")
+        # Run FP32 with both optimizations
+        print("\nFP32 + Pinned + TF32:")
         print("-" * 70)
-        time_mixed_pinned, losses_mixed_pinned = benchmark_training(
-            replay_buffer, num_steps, batch_size, use_mixed_precision=True, use_pinned_memory=True
+        time_fp32_all, losses_fp32_all = benchmark_training(
+            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=True, use_tf32=True
         )
-        results[batch_size]['mixed_pinned'] = time_mixed_pinned
-        print(f"  Total time: {time_mixed_pinned:.2f}s | Avg time/step: {time_mixed_pinned/num_steps*1000:.2f}ms")
+        results[batch_size]['fp32_all'] = time_fp32_all
+        print(f"  Total time: {time_fp32_all:.2f}s | Avg time/step: {time_fp32_all/num_steps*1000:.2f}ms")
 
         # Comparison for this batch size
         if torch.cuda.is_available():
             print("\n  Comparisons vs FP32 baseline:")
             speedup_pinned = time_fp32 / time_fp32_pinned
-            speedup_mixed = time_fp32 / time_mixed
-            speedup_mixed_pinned = time_fp32 / time_mixed_pinned
-            print(f"    FP32 + Pinned:        {speedup_pinned:.2f}x")
-            print(f"    Mixed Precision:      {speedup_mixed:.2f}x")
-            print(f"    Mixed + Pinned:       {speedup_mixed_pinned:.2f}x")
+            speedup_tf32 = time_fp32 / time_fp32_tf32
+            speedup_all = time_fp32 / time_fp32_all
+            print(f"    + Pinned:             {speedup_pinned:.2f}x")
+            print(f"    + TF32:               {speedup_tf32:.2f}x")
+            print(f"    + Pinned + TF32:      {speedup_all:.2f}x")
 
         print()
 
     # Summary table
-    print("\n" + "="*90)
+    print("\n" + "="*100)
     print("SUMMARY - Time per Training Step (milliseconds)")
-    print("="*90)
-    print(f"{'Batch':<10} {'FP32':<12} {'FP32+Pin':<12} {'Mixed':<12} {'Mixed+Pin':<12} {'Best':<15}")
-    print("-" * 90)
+    print("="*100)
+    print(f"{'Batch':<10} {'FP32':<12} {'+Pinned':<12} {'+TF32':<12} {'+Both':<12} {'Best':<20}")
+    print("-" * 100)
 
     for batch_size in batch_sizes:
         fp32_time = results[batch_size]['fp32'] / num_steps * 1000
         fp32_pinned_time = results[batch_size]['fp32_pinned'] / num_steps * 1000
-        mixed_time = results[batch_size]['mixed'] / num_steps * 1000
-        mixed_pinned_time = results[batch_size]['mixed_pinned'] / num_steps * 1000
+        fp32_tf32_time = results[batch_size]['fp32_tf32'] / num_steps * 1000
+        fp32_all_time = results[batch_size]['fp32_all'] / num_steps * 1000
 
-        best_time = min(fp32_time, fp32_pinned_time, mixed_time, mixed_pinned_time)
+        best_time = min(fp32_time, fp32_pinned_time, fp32_tf32_time, fp32_all_time)
         best_speedup = fp32_time / best_time
 
         if best_time == fp32_time:
             best_label = "FP32"
         elif best_time == fp32_pinned_time:
-            best_label = "FP32+Pin"
-        elif best_time == mixed_time:
-            best_label = "Mixed"
+            best_label = "FP32+Pinned"
+        elif best_time == fp32_tf32_time:
+            best_label = "FP32+TF32"
         else:
-            best_label = "Mixed+Pin"
+            best_label = "FP32+Pinned+TF32"
 
-        print(f"{batch_size:<10} {fp32_time:<12.2f} {fp32_pinned_time:<12.2f} {mixed_time:<12.2f} {mixed_pinned_time:<12.2f} {best_label} ({best_speedup:.2f}x)")
+        print(f"{batch_size:<10} {fp32_time:<12.2f} {fp32_pinned_time:<12.2f} {fp32_tf32_time:<12.2f} {fp32_all_time:<12.2f} {best_label} ({best_speedup:.2f}x)")
 
-    print("="*90)
+    print("="*100)
 
 
 if __name__ == "__main__":

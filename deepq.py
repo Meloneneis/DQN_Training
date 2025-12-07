@@ -195,7 +195,12 @@ def learn(env,
 
     # set float as default
     torch.set_default_dtype (torch.float32)
-    
+
+    # Enable TF32 for faster matmul on Ampere+ GPUs
+    if torch.cuda.is_available():
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+
     if torch.cuda.is_available():
         print("\nUsing CUDA.")
         print (torch.version.cuda,"\n")
