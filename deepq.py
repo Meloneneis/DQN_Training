@@ -272,7 +272,7 @@ def learn(env,
     if lr_scheduler.lower() == 'cosine':
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_timesteps)
     elif lr_scheduler.lower() == 'exponential':
-        scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.995)
+        scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.999994)
     elif lr_scheduler.lower() != 'none':
         raise ValueError(f"Unknown lr_scheduler: {lr_scheduler}. Choose from 'none', 'cosine', 'exponential'")
 
