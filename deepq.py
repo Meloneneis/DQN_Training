@@ -261,11 +261,11 @@ def learn(env,
     target_net.load_state_dict(policy_net.state_dict())
     target_net.eval()
 
-    # Compile models for faster execution (PyTorch 2.0+)
-    if hasattr(torch, 'compile'):
-        policy_net = torch.compile(policy_net)
-        target_net = torch.compile(target_net)
-        print("Models compiled with torch.compile()\n")
+    # Note: torch.compile() disabled due to compatibility issues with PyTorch 2.0.1 + CUDA 11.7
+    # if hasattr(torch, 'compile'):
+    #     policy_net = torch.compile(policy_net)
+    #     target_net = torch.compile(target_net)
+    #     print("Models compiled with torch.compile()\n")
 
     # Create replay buffer
     replay_buffer = ReplayBuffer(buffer_size)

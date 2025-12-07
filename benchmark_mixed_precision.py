@@ -374,11 +374,11 @@ def main():
 
         time.sleep(1)
 
-        # Run with ALL optimizations
-        print("\nALL OPTIMIZATIONS (Pinned + TF32 + Compile + Channels Last + cuDNN):")
+        # Run with ALL optimizations (skip torch.compile due to compatibility issues)
+        print("\nALL OPTIMIZATIONS (Pinned + TF32 + Channels Last + cuDNN):")
         print("-" * 70)
         time_full, losses_full = benchmark_training(
-            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=True, use_tf32=True, use_bfloat16=False, use_compile=True, use_channels_last=True, use_cudnn_benchmark=True
+            replay_buffer, num_steps, batch_size, use_mixed_precision=False, use_pinned_memory=True, use_tf32=True, use_bfloat16=False, use_compile=False, use_channels_last=True, use_cudnn_benchmark=True
         )
         results[batch_size]['full'] = time_full
         print(f"  Total time: {time_full:.2f}s | Avg time/step: {time_full/num_steps*1000:.2f}ms")
