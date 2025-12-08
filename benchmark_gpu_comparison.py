@@ -100,6 +100,12 @@ def agent_worker(agent_id, batch_size, num_steps, result_queue, replay_buffer_da
     replay_buffer._storage = replay_buffer_data['storage']
     replay_buffer._next_idx = replay_buffer_data['next_idx']
 
+    # Verify CUDA is being used
+    if agent_id == 0:
+        print(f"  Agent {agent_id}: Using device: {device}")
+        if torch.cuda.is_available():
+            print(f"  Agent {agent_id}: CUDA device: {torch.cuda.get_device_name(0)}")
+
     # Use continuous action model (NAF) matching wandb config
     from model import ContinuousActionDQN
     action_dim = 3  # steering, gas, brake
