@@ -9,7 +9,6 @@ import torch.optim as optim
 import time
 import numpy as np
 import gymnasium as gym
-from model import DQN
 from sdc_wrapper import SDC_Wrapper
 from utils import get_state
 from replay_buffer import ReplayBuffer
@@ -97,14 +96,9 @@ def agent_worker(agent_id, batch_size, num_steps, result_queue, replay_buffer_da
         device = torch.device("cpu")
 
     # Reconstruct replay buffer from shared data
-    replay_buffer = ReplayBuffer(len(replay_buffer_data['observations']))
-    replay_buffer.observations = replay_buffer_data['observations']
-    replay_buffer.actions = replay_buffer_data['actions']
-    replay_buffer.rewards = replay_buffer_data['rewards']
-    replay_buffer.next_observations = replay_buffer_data['next_observations']
-    replay_buffer.dones = replay_buffer_data['dones']
-    replay_buffer.idx = replay_buffer_data['idx']
-    replay_buffer.full = replay_buffer_data['full']
+    replay_buffer = ReplayBuffer(replay_buffer_data['maxsize'])
+    replay_buffer._storage = replay_buffer_data['storage']
+    replay_buffer._next_idx = replay_buffer_data['next_idx']
 
     # Use continuous action model (NAF) matching wandb config
     from model import ContinuousActionDQN
@@ -230,13 +224,9 @@ def main():
 
     # Convert replay buffer to dictionary for multiprocessing
     replay_buffer_data = {
-        'observations': replay_buffer.observations,
-        'actions': replay_buffer.actions,
-        'rewards': replay_buffer.rewards,
-        'next_observations': replay_buffer.next_observations,
-        'dones': replay_buffer.dones,
-        'idx': replay_buffer.idx,
-        'full': replay_buffer.full
+        'storage': replay_buffer._storage,
+        'maxsize': replay_buffer._maxsize,
+        'next_idx': replay_buffer._next_idx
     }
 
     all_results = {}
