@@ -1,6 +1,6 @@
 """
 GPU Comparison Benchmark for DQN Training
-Tests training speed across different batch sizes and number of runs
+Tests training speed with parallel agents (simulating wandb sweep agents)
 """
 
 import torch
@@ -13,6 +13,8 @@ from model import DQN
 from sdc_wrapper import SDC_Wrapper
 from utils import get_state
 from replay_buffer import ReplayBuffer
+import multiprocessing as mp
+from multiprocessing import Process, Queue
 
 
 def collect_real_data(num_samples=10000, seed=42):
@@ -85,43 +87,46 @@ def training_step(policy_net, target_net, optimizer, replay_buffer, batch_size, 
     return loss.item()
 
 
-def benchmark_training(replay_buffer, num_steps=500, batch_size=256):
-    """Benchmark training with current optimizations"""
+def agent_worker(agent_id, batch_size, num_steps, result_queue, seed_offset):
+    """Worker function for a single agent (runs in separate process)"""
     if torch.cuda.is_available():
         device = torch.device("cuda")
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
     else:
         device = torch.device("cpu")
-        print("WARNING: Using CPU")
 
-    action_size = 9
-    policy_net = DQN(
-        action_size=action_size,
+    # Collect data for this agent
+    replay_buffer = collect_real_data(num_samples=10000, seed=42 + seed_offset)
+
+    # Use continuous action model (NAF) matching wandb config
+    from model import ContinuousActionDQN
+    action_dim = 3  # steering, gas, brake
+
+    policy_net = ContinuousActionDQN(
+        action_dim=action_dim,
         device=device,
         hidden_sizes=[1024, 512],
-        dropout_rate=0.2,
-        cnn_channels=[32, 64, 128, 128],
+        dropout_rate=0.0223099016747042,
+        cnn_channels=[128, 256, 512, 512],
         cnn_kernels=[8, 4, 3, 3],
         cnn_strides=[4, 2, 1, 1],
         final_spatial_size=6,
         activation='relu',
-        normalization='layer',
-        use_dueling=False
+        normalization='none'
     ).to(device)
 
-    target_net = DQN(
-        action_size=action_size,
+    target_net = ContinuousActionDQN(
+        action_dim=action_dim,
         device=device,
         hidden_sizes=[1024, 512],
-        dropout_rate=0.2,
-        cnn_channels=[32, 64, 128, 128],
+        dropout_rate=0.0223099016747042,
+        cnn_channels=[128, 256, 512, 512],
         cnn_kernels=[8, 4, 3, 3],
         cnn_strides=[4, 2, 1, 1],
         final_spatial_size=6,
         activation='relu',
-        normalization='layer',
-        use_dueling=False
+        normalization='none'
     ).to(device)
 
     target_net.load_state_dict(policy_net.state_dict())
@@ -138,11 +143,9 @@ def benchmark_training(replay_buffer, num_steps=500, batch_size=256):
         torch.cuda.synchronize()
 
     start_time = time.time()
-    losses = []
 
     for step in range(num_steps):
-        loss = training_step(policy_net, target_net, optimizer, replay_buffer, batch_size, gamma, device)
-        losses.append(loss)
+        _ = training_step(policy_net, target_net, optimizer, replay_buffer, batch_size, gamma, device)
 
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -150,14 +153,47 @@ def benchmark_training(replay_buffer, num_steps=500, batch_size=256):
     end_time = time.time()
     total_time = end_time - start_time
 
-    return total_time, losses
+    result_queue.put({
+        'agent_id': agent_id,
+        'total_time': total_time,
+        'time_per_step': total_time / num_steps * 1000
+    })
+
+
+def benchmark_parallel_agents(batch_size, num_steps, num_agents):
+    """Run multiple agents in parallel"""
+    result_queue = Queue()
+    processes = []
+
+    print(f"  Starting {num_agents} parallel agent(s)...")
+    start_time = time.time()
+
+    for agent_id in range(num_agents):
+        p = Process(target=agent_worker, args=(agent_id, batch_size, num_steps, result_queue, agent_id))
+        p.start()
+        processes.append(p)
+
+    # Wait for all agents to complete
+    for p in processes:
+        p.join()
+
+    wall_time = time.time() - start_time
+
+    # Collect results
+    results = []
+    while not result_queue.empty():
+        results.append(result_queue.get())
+
+    results = sorted(results, key=lambda x: x['agent_id'])
+
+    return results, wall_time
 
 
 def main():
     """Run GPU comparison benchmark"""
-    print("="*80)
-    print("GPU COMPARISON BENCHMARK - DQN Training Speed")
-    print("="*80)
+    print("="*100)
+    print("GPU PARALLEL TRAINING BENCHMARK - Simulating Multiple Wandb Agents")
+    print("="*100)
     print()
 
     if not torch.cuda.is_available():
@@ -172,94 +208,92 @@ def main():
 
     num_steps = 500
     batch_sizes = [32, 64, 128]
-    num_runs_list = [1, 2, 4]
+    num_agents_list = [1, 2, 4]
 
-    # Collect data once
-    replay_buffer = collect_real_data(num_samples=10000)
-
-    results = {}
+    all_results = {}
 
     for batch_size in batch_sizes:
-        print("\n" + "="*80)
+        print("\n" + "="*100)
         print(f"BATCH SIZE: {batch_size}")
-        print("="*80)
+        print("="*100)
 
-        results[batch_size] = {}
+        all_results[batch_size] = {}
 
-        for num_runs in num_runs_list:
-            print(f"\n{num_runs} Run(s):")
-            print("-" * 80)
+        for num_agents in num_agents_list:
+            print(f"\n{num_agents} Parallel Agent(s):")
+            print("-" * 100)
 
-            run_times = []
+            agent_results, wall_time = benchmark_parallel_agents(batch_size, num_steps, num_agents)
 
-            for run_idx in range(num_runs):
-                print(f"  Run {run_idx + 1}/{num_runs}...", end=" ", flush=True)
-                total_time, losses = benchmark_training(replay_buffer, num_steps, batch_size)
-                run_times.append(total_time)
-                print(f"Done ({total_time:.2f}s)")
-
-                time.sleep(0.5)
-
-            avg_time = np.mean(run_times)
-            std_time = np.std(run_times)
-            time_per_step = avg_time / num_steps * 1000
-
-            results[batch_size][num_runs] = {
-                'avg_time': avg_time,
-                'std_time': std_time,
-                'time_per_step': time_per_step,
-                'run_times': run_times
+            all_results[batch_size][num_agents] = {
+                'agent_results': agent_results,
+                'wall_time': wall_time
             }
 
-            print(f"\n  Average total time: {avg_time:.2f}s ± {std_time:.2f}s")
-            print(f"  Average time per step: {time_per_step:.2f}ms")
-            if num_runs > 1:
-                print(f"  Individual runs: {[f'{t:.2f}s' for t in run_times]}")
+            print(f"\n  Wall clock time (all {num_agents} agent(s) complete): {wall_time:.2f}s")
+            print(f"\n  Individual agent times:")
+            for res in agent_results:
+                print(f"    Agent {res['agent_id']}: {res['total_time']:.2f}s ({res['time_per_step']:.2f}ms/step)")
+
+            avg_agent_time = np.mean([r['total_time'] for r in agent_results])
+            avg_time_per_step = np.mean([r['time_per_step'] for r in agent_results])
+
+            print(f"\n  Average per-agent time: {avg_agent_time:.2f}s")
+            print(f"  Average time/step per agent: {avg_time_per_step:.2f}ms")
+
+            if num_agents > 1:
+                slowdown = avg_agent_time / all_results[batch_size][1]['agent_results'][0]['total_time']
+                print(f"  Slowdown vs 1 agent: {slowdown:.2f}x")
 
     # Summary table
     print("\n\n" + "="*120)
-    print("SUMMARY - GPU Comparison Results")
+    print("SUMMARY - Parallel GPU Performance")
     print("="*120)
-    print(f"{'Batch Size':<15} {'Metric':<25} {'1 Run':<20} {'2 Runs':<20} {'4 Runs':<20}")
+    print(f"{'Batch':<10} {'# Agents':<12} {'Wall Time (s)':<18} {'Avg Agent Time (s)':<22} {'Avg Time/Step (ms)':<22} {'Slowdown':<15}")
     print("-" * 120)
 
     for batch_size in batch_sizes:
-        # Total time
-        print(f"{batch_size:<15} {'Total Time (s)':<25} ", end="")
-        for num_runs in num_runs_list:
-            avg = results[batch_size][num_runs]['avg_time']
-            std = results[batch_size][num_runs]['std_time']
-            if num_runs == 1:
-                print(f"{avg:<20.2f} ", end="")
-            else:
-                print(f"{avg:.2f} ± {std:.2f}{' '*(20-len(f'{avg:.2f} ± {std:.2f}'))}", end="")
-        print()
+        for num_agents in num_agents_list:
+            data = all_results[batch_size][num_agents]
+            wall_time = data['wall_time']
+            agent_results = data['agent_results']
 
-        # Time per step
-        print(f"{'':<15} {'Time/Step (ms)':<25} ", end="")
-        for num_runs in num_runs_list:
-            time_per_step = results[batch_size][num_runs]['time_per_step']
-            print(f"{time_per_step:<20.2f} ", end="")
-        print()
+            avg_agent_time = np.mean([r['total_time'] for r in agent_results])
+            avg_time_per_step = np.mean([r['time_per_step'] for r in agent_results])
+
+            if num_agents == 1:
+                slowdown_str = "1.00x (baseline)"
+            else:
+                slowdown = avg_agent_time / all_results[batch_size][1]['agent_results'][0]['total_time']
+                slowdown_str = f"{slowdown:.2f}x"
+
+            print(f"{batch_size:<10} {num_agents:<12} {wall_time:<18.2f} {avg_agent_time:<22.2f} {avg_time_per_step:<22.2f} {slowdown_str:<15}")
 
         if batch_size != batch_sizes[-1]:
             print("-" * 120)
 
     print("="*120)
 
-    # Export results for comparison
-    print("\n\n" + "="*80)
-    print("QUICK REFERENCE - Copy this for GPU comparison")
-    print("="*80)
+    # Quick reference
+    print("\n\n" + "="*100)
+    print("QUICK REFERENCE - GPU Parallel Performance")
+    print("="*100)
     print(f"GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
     print(f"Configuration: Pinned Memory + TF32 enabled")
     print()
-    print(f"{'Batch':<10} {'Time/Step (ms)':<20}")
-    print("-" * 30)
+    print(f"{'Batch':<10} {'1 Agent (ms/step)':<20} {'2 Agents (ms/step)':<20} {'4 Agents (ms/step)':<20}")
+    print("-" * 70)
     for batch_size in batch_sizes:
-        time_per_step = results[batch_size][1]['time_per_step']
-        print(f"{batch_size:<10} {time_per_step:<20.2f}")
-    print("="*80)
+        print(f"{batch_size:<10} ", end="")
+        for num_agents in num_agents_list:
+            avg_time_per_step = np.mean([r['time_per_step'] for r in all_results[batch_size][num_agents]['agent_results']])
+            print(f"{avg_time_per_step:<20.2f} ", end="")
+        print()
+    print("="*100)
+    print("\nNote: Wall time shows total time until ALL agents complete (parallel execution)")
+    print("      Avg time/step shows average training speed per individual agent")
+    print("      Slowdown shows performance degradation when running multiple agents")
+    print("="*100)
 
 
 if __name__ == "__main__":
