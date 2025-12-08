@@ -40,8 +40,9 @@ def collect_real_data(num_samples=10000, seed=42):
 
         next_obs = get_state(next_obs)
 
-        action_id = np.random.randint(0, 9)
-        replay_buffer.add(obs, action_id, reward, next_obs, float(done))
+        # For continuous actions: [steering, gas, brake]
+        continuous_action = np.array([action[0], action[1], action[2]], dtype=np.float32)
+        replay_buffer.add(obs, continuous_action, reward, next_obs, float(done))
 
         obs = next_obs
 
@@ -59,21 +60,20 @@ def collect_real_data(num_samples=10000, seed=42):
 
 
 def training_step(policy_net, target_net, optimizer, replay_buffer, batch_size, gamma, device):
-    """Perform one training step"""
+    """Perform one training step for continuous actions (NAF)"""
     obs_batch, act_batch, rew_batch, next_obs_batch, done_batch = replay_buffer.sample(batch_size)
 
     obs_batch = torch.FloatTensor(obs_batch).pin_memory().to(device, non_blocking=True)
-    act_batch = torch.LongTensor(act_batch).pin_memory().to(device, non_blocking=True)
+    act_batch = torch.FloatTensor(act_batch).pin_memory().to(device, non_blocking=True)
     rew_batch = torch.FloatTensor(rew_batch).pin_memory().to(device, non_blocking=True)
     next_obs_batch = torch.FloatTensor(next_obs_batch).pin_memory().to(device, non_blocking=True)
     done_batch = torch.FloatTensor(done_batch).pin_memory().to(device, non_blocking=True)
 
-    q_values = policy_net(obs_batch)
-    q_values = q_values.gather(1, act_batch.unsqueeze(1)).squeeze(1)
+    q_values, _ = policy_net(obs_batch, act_batch)
 
     with torch.no_grad():
-        next_q_values = target_net(next_obs_batch)
-        next_q_values = next_q_values.max(1)[0]
+        next_actions = target_net(next_obs_batch)
+        next_q_values, _ = target_net(next_obs_batch, next_actions)
         next_q_values = next_q_values * (1 - done_batch)
         target_q_values = rew_batch + gamma * next_q_values
 
