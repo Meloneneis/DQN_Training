@@ -87,7 +87,7 @@ def training_step(policy_net, target_net, optimizer, replay_buffer, batch_size, 
     return loss.item()
 
 
-def agent_worker(agent_id, batch_size, num_steps, result_queue, seed_offset):
+def agent_worker(agent_id, batch_size, num_steps, result_queue, replay_buffer_data):
     """Worker function for a single agent (runs in separate process)"""
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -96,8 +96,15 @@ def agent_worker(agent_id, batch_size, num_steps, result_queue, seed_offset):
     else:
         device = torch.device("cpu")
 
-    # Collect data for this agent
-    replay_buffer = collect_real_data(num_samples=10000, seed=42 + seed_offset)
+    # Reconstruct replay buffer from shared data
+    replay_buffer = ReplayBuffer(len(replay_buffer_data['observations']))
+    replay_buffer.observations = replay_buffer_data['observations']
+    replay_buffer.actions = replay_buffer_data['actions']
+    replay_buffer.rewards = replay_buffer_data['rewards']
+    replay_buffer.next_observations = replay_buffer_data['next_observations']
+    replay_buffer.dones = replay_buffer_data['dones']
+    replay_buffer.idx = replay_buffer_data['idx']
+    replay_buffer.full = replay_buffer_data['full']
 
     # Use continuous action model (NAF) matching wandb config
     from model import ContinuousActionDQN
@@ -160,7 +167,7 @@ def agent_worker(agent_id, batch_size, num_steps, result_queue, seed_offset):
     })
 
 
-def benchmark_parallel_agents(batch_size, num_steps, num_agents):
+def benchmark_parallel_agents(batch_size, num_steps, num_agents, replay_buffer_data):
     """Run multiple agents in parallel"""
     result_queue = Queue()
     processes = []
@@ -169,7 +176,7 @@ def benchmark_parallel_agents(batch_size, num_steps, num_agents):
     start_time = time.time()
 
     for agent_id in range(num_agents):
-        p = Process(target=agent_worker, args=(agent_id, batch_size, num_steps, result_queue, agent_id))
+        p = Process(target=agent_worker, args=(agent_id, batch_size, num_steps, result_queue, replay_buffer_data))
         p.start()
         processes.append(p)
 
@@ -213,6 +220,21 @@ def main():
     batch_sizes = [32, 64, 128]
     num_agents_list = [1, 2, 4]
 
+    # Collect data once and share across all agents
+    print("Collecting training data (shared across all agents)...")
+    replay_buffer = collect_real_data(num_samples=10000, seed=42)
+
+    # Convert replay buffer to dictionary for multiprocessing
+    replay_buffer_data = {
+        'observations': replay_buffer.observations,
+        'actions': replay_buffer.actions,
+        'rewards': replay_buffer.rewards,
+        'next_observations': replay_buffer.next_observations,
+        'dones': replay_buffer.dones,
+        'idx': replay_buffer.idx,
+        'full': replay_buffer.full
+    }
+
     all_results = {}
 
     for batch_size in batch_sizes:
@@ -226,7 +248,7 @@ def main():
             print(f"\n{num_agents} Parallel Agent(s):")
             print("-" * 100)
 
-            agent_results, wall_time = benchmark_parallel_agents(batch_size, num_steps, num_agents)
+            agent_results, wall_time = benchmark_parallel_agents(batch_size, num_steps, num_agents, replay_buffer_data)
 
             all_results[batch_size][num_agents] = {
                 'agent_results': agent_results,
