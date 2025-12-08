@@ -4,10 +4,6 @@ metric:
   name: val_reward
   goal: maximize
   impute: best
-early_terminate:
-  type: hyperband
-  min_iter: 5
-  eta: 2
 parameters:
   total_timesteps:
     value: 400000
@@ -57,7 +53,7 @@ parameters:
       'large_extended',
       'xlarge_full',
       'xlarge_hybrid_drift',
-      'xlarge_aggressive_drifter'
+      #'xlarge_aggressive_drifter'
     ]
   cnn_config:
     values: [
