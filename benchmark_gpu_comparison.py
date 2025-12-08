@@ -191,6 +191,9 @@ def benchmark_parallel_agents(batch_size, num_steps, num_agents):
 
 def main():
     """Run GPU comparison benchmark"""
+    # Set multiprocessing start method to 'spawn' for CUDA compatibility
+    mp.set_start_method('spawn', force=True)
+
     print("="*100)
     print("GPU PARALLEL TRAINING BENCHMARK - Simulating Multiple Wandb Agents")
     print("="*100)
