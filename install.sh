@@ -3,36 +3,49 @@ set -e  # Exit immediately if any command fails
 
 echo "--- Starting Installation ---"
 
-# 1. Install uv (using standard pip)
+# 1. Initialize Conda Environment 🐍
+# This boilerplate ensures 'conda activate' works correctly inside the script.
+if command -v conda &> /dev/null; then
+    eval "$(conda shell.bash hook)"
+else
+    echo "Error: Conda is not found. Please ensure it is installed and in your PATH." >&2
+    exit 1
+fi
+
+# 2. Create and Activate Conda environment 'sdc' with python=3.8.10
+ENV_NAME="sdc"
+PYTHON_VERSION="3.8.10"
+
+if ! conda env list | grep -q "^${ENV_NAME}\s"; then
+    echo "Creating Conda environment '${ENV_NAME}' with python=${PYTHON_VERSION}..."
+    conda create -n "${ENV_NAME}" python="${PYTHON_VERSION}" -y
+fi
+
+echo "Activating Conda environment '${ENV_NAME}'..."
+conda activate "${ENV_NAME}"
+
+# 3. Install uv inside the Conda environment
+# We use standard pip, which is now the pip inside the 'sdc' environment.
+echo "Installing uv..."
 pip install uv
 
-# 2. Create and activate a virtual environment (Required for uv)
-# If a venv folder doesn't exist, create it.
-if [ ! -d ".venv" ]; then
-    echo "Creating virtual environment..."
-    uv venv
-fi
-# Activate the environment
-source .venv/bin/activate
+# --- The rest of the uv commands now execute within the 'sdc' environment ---
 
-# 3. Install swig
+# 4. Install swig
 echo "Installing swig..."
 uv pip install swig
 
-# 4. Upgrade typing_extensions (Corrected from 'extension')
+# 5. Upgrade typing_extensions
 echo "Upgrading typing_extensions..."
 uv pip install typing_extensions --upgrade
 
-# 5. Install Torch/Vision with CUDA 12.1 Index
-# Note: As discussed, Torch 2.0.1 + cu121 is a rare combination.
-# This command attempts to find it; if it fails, consider changing versions.
+# 6. Install Torch/Vision with CUDA 12.1 Index
+# Note: Ensure these versions are compatible with cu121.
 echo "Installing Torch/Torchvision from CUDA 12.1 index..."
 uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
-# 6. Install requirements.txt (Safe Mode)
-# We use grep to filter out torch/torchvision lines from the file
-# and pipe the result to uv. This prevents uv from reinstalling the
-# Wrong (CPU) versions of torch over the CUDA ones you just installed.
+# 7. Install remaining requirements (Safe Mode)
+# This filters out torch/torchvision to prevent the CUDA version from being overwritten by CPU versions from PyPI.
 echo "Installing remaining requirements..."
 grep -vE "^torch==|^torchvision==" requirements.txt | uv pip install -r /dev/stdin
 

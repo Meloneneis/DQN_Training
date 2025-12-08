@@ -3,3 +3,6 @@ box2d-py==2.3.5
 Farama-Notifications==0.0.4
 gymnasium==0.28.1
 typing-extensions
+pygame==2.6.1
+matplotlib
+wandb
