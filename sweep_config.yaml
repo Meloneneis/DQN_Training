@@ -3,15 +3,20 @@ method: bayes
 metric:
   name: val_reward
   goal: maximize
+  impute: best
+early_terminate:
+  type: hyperband
+  min_iter: 5
+  eta: 2
 parameters:
   total_timesteps:
     value: 400000
   action_repeat:
-    values: [2, 3]
+    values: [2, 3, 4]
   lr:
     distribution: log_uniform_values
-    min: 0.00003
-    max: 0.0003
+    min: 0.00001
+    max: 0.0001
   batch_size:
     values: [32, 64, 128]
   gamma:
@@ -21,21 +26,21 @@ parameters:
   exploration_fraction:
     distribution: uniform
     min: 0.1
-    max: 0.3
+    max: 0.25
   exploration_final_eps:
     distribution: uniform
     min: 0.01
-    max: 0.05
+    max: 0.07
   target_network_update_freq:
-    values: [1500, 2000]
+    values: [1000, 1500, 2000]
   buffer_size:
-    values: [200000, 300000]
+    values: [150000, 200000, 250000]
   learning_starts:
-    values: [500, 1000]
+    values: [500, 1000, 1500]
   optimizer_type:
     values: ['adamw', 'adam']
   activation:
-    values: ['relu', 'gelu', 'silu']
+    values: ['gelu', 'silu']
   action_config:
     values: [
       # Minimal (5 actions)
@@ -45,12 +50,14 @@ parameters:
       # 'small_balanced',
       # 'small_precision',
       # Medium (9-10 actions)
-      'medium_balanced',
-      'medium_original',
+      # 'medium_balanced',
+      # 'medium_original',
       # Large (12-16 actions)
       'large_precision',
       'large_extended',
-      'xlarge_full'
+      'xlarge_full',
+      'xlarge_hybrid_drift',
+      'xlarge_aggressive_drifter'
     ]
   cnn_config:
     values: [
@@ -73,21 +80,19 @@ parameters:
       'medium_2layer',   # [512, 256]
       'large_2layer',    # [1024, 512]
       # 'xlarge_2layer',   # [2048, 1024]
-      'medium_3layer',   # [512, 256, 128]
+      # 'medium_3layer',   # [512, 256, 128]
       'large_3layer',    # [1024, 512, 256]
       'large_4layer'     # [1024, 512, 256, 128]
     ]
   dropout_rate:
-    distribution: uniform
-    min: 0.0
-    max: 0.3
+    value: 0
   normalization:
     values: ['layer', 'none']
   use_dueling:
-    values: [true, false]
+    value: true
   lr_scheduler:
-    values: ['none', 'cosine', 'exponential']
+    values: ['none', 'cosine']
   weight_decay:
     distribution: log_uniform_values
     min: 0.00001
-    max: 0.001
+    max: 0.0007

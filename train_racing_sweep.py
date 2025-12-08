@@ -134,6 +134,57 @@ def get_action_set(config_name):
             [-0.5, 0.0, 0.6],
             [0.5, 0.0, 0.6],
         ],
+
+        'xlarge_hybrid_drift': [
+            # Speed & Cruise
+            [0.0, 1.0, 0.0],    # straight, full gas
+            [0.0, 0.5, 0.0],    # straight, cruise
+            [0.0, 0.0, 0.6],    # brake
+
+            # Micro Adjustments
+            [-0.2, 1.0, 0.0],   # slight left, full gas
+            [0.2, 1.0, 0.0],    # slight right, full gas
+
+            # Racing Turns
+            [-0.6, 0.7, 0.0],   # medium left, fast
+            [0.6, 0.7, 0.0],    # medium right, fast
+
+            # Tight Cornering
+            [-1.0, 0.3, 0.0],   # hard left, slow
+            [1.0, 0.3, 0.0],    # hard right, slow
+
+            # Drifting
+            [-1.0, 0.0, 0.5],   # hard left + brake
+            [1.0, 0.0, 0.5],    # hard right + brake
+            [-0.5, 0.0, 0.5],   # medium left + brake
+            [0.5, 0.0, 0.5],    # medium right + brake
+        ],
+
+        'xlarge_aggressive_drifter': [
+            # Max speed vs Max stopping power
+            [0.0, 1.0, 0.0],  # straight, full gas
+            [0.0, 0.0, 1.0],  # emergency brake
+
+            # High-speed micro corrections
+            [-0.2, 1.0, 0.0],  # slight left, full gas
+            [0.2, 1.0, 0.0],  # slight right, full gas
+
+            # Fast racing lines
+            [-0.5, 0.8, 0.0],  # medium left, high gas
+            [0.5, 0.8, 0.0],  # medium right, high gas
+
+            # Power sliding
+            [-1.0, 0.9, 0.0],  # max left, turbo gas
+            [1.0, 0.9, 0.0],  # max right, turbo gas
+
+            # Drift initiation
+            [-1.0, 0.0, 0.8],  # max left, hard brake
+            [1.0, 0.0, 0.8],  # max right, hard brake
+
+            # Trail braking
+            [-0.5, 0.0, 0.5],  # medium left, soft brake
+            [0.5, 0.0, 0.5],  # medium right, soft brake
+        ],
     }
 
     if config_name not in action_sets:
