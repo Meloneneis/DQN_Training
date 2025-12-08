@@ -149,7 +149,7 @@ def agent_worker(agent_id, batch_size, num_steps, result_queue, replay_buffer_da
         _ = training_step(policy_net, target_net, optimizer, replay_buffer, batch_size, gamma, device)
 
         # Print progress for agent 0 only
-        if agent_id == 0 and (step + 1) % 50 == 0:
+        if agent_id == 0 and (step + 1) % 100 == 0:
             print(f"  Agent 0: Step {step + 1}/{num_steps}")
 
     if torch.cuda.is_available():
@@ -214,7 +214,7 @@ def main():
         print(f"Total GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB")
     print()
 
-    num_steps = 500
+    num_steps = 1000
     batch_sizes = [32, 64, 128]
     num_agents_list = [1, 2, 4]
 
