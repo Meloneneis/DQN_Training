@@ -154,6 +154,10 @@ def agent_worker(agent_id, batch_size, num_steps, result_queue, replay_buffer_da
     for step in range(num_steps):
         _ = training_step(policy_net, target_net, optimizer, replay_buffer, batch_size, gamma, device)
 
+        # Print progress for agent 0 only
+        if agent_id == 0 and (step + 1) % 50 == 0:
+            print(f"  Agent 0: Step {step + 1}/{num_steps}")
+
     if torch.cuda.is_available():
         torch.cuda.synchronize()
 
