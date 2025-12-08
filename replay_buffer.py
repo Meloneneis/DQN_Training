@@ -42,16 +42,30 @@ class ReplayBuffer(object):
         self._next_idx = (self._next_idx + 1) % self._maxsize
 
     def _encode_sample(self, idxes):
-        obses_t, actions, rewards, obses_tp1, dones = [], [], [], [], []
-        for i in idxes:
+        batch_size = len(idxes)
+        first_obs = self._storage[idxes[0]][0]
+        first_action = self._storage[idxes[0]][1]
+
+        obs_shape = first_obs.shape if hasattr(first_obs, 'shape') else (len(first_obs),)
+        action_shape = first_action.shape if hasattr(first_action, 'shape') else (len(first_action) if hasattr(first_action, '__len__') else (),)
+
+        # Pre-allocate arrays
+        obses_t = np.empty((batch_size,) + obs_shape, dtype=np.float32)
+        obses_tp1 = np.empty((batch_size,) + obs_shape, dtype=np.float32)
+        actions = np.empty((batch_size,) + action_shape, dtype=np.float32 if action_shape else np.int64)
+        rewards = np.empty(batch_size, dtype=np.float32)
+        dones = np.empty(batch_size, dtype=np.float32)
+
+        for idx, i in enumerate(idxes):
             data = self._storage[i]
             obs_t, action, reward, obs_tp1, done = data
-            obses_t.append(obs_t)
-            actions.append(np.array(action, copy=False))
-            rewards.append(reward)
-            obses_tp1.append(obs_tp1)
-            dones.append(done)
-        return np.squeeze(np.array(obses_t), axis=1), np.array(actions), np.array(rewards, dtype=np.float32), np.squeeze(np.array(obses_tp1), axis=1), np.array(dones, dtype=np.float32)
+            obses_t[idx] = obs_t
+            actions[idx] = action
+            rewards[idx] = reward
+            obses_tp1[idx] = obs_tp1
+            dones[idx] = done
+
+        return np.squeeze(obses_t, axis=1), actions, rewards, np.squeeze(obses_tp1, axis=1), dones
 
     def sample(self, batch_size):
         """Sample a batch of experiences.
