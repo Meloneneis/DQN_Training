@@ -47,12 +47,21 @@ class ReplayBuffer(object):
         first_action = self._storage[idxes[0]][1]
 
         obs_shape = first_obs.shape if hasattr(first_obs, 'shape') else (len(first_obs),)
-        action_shape = first_action.shape if hasattr(first_action, 'shape') else (len(first_action) if hasattr(first_action, '__len__') else (),)
+
+        if hasattr(first_action, 'shape'):
+            action_shape = first_action.shape
+            action_dtype = np.float32
+        elif hasattr(first_action, '__len__'):
+            action_shape = (len(first_action),)
+            action_dtype = np.float32
+        else:
+            action_shape = ()
+            action_dtype = np.int64
 
         # Pre-allocate arrays
         obses_t = np.empty((batch_size,) + obs_shape, dtype=np.float32)
         obses_tp1 = np.empty((batch_size,) + obs_shape, dtype=np.float32)
-        actions = np.empty((batch_size,) + action_shape, dtype=np.float32 if action_shape else np.int64)
+        actions = np.empty((batch_size,) + action_shape, dtype=action_dtype)
         rewards = np.empty(batch_size, dtype=np.float32)
         dones = np.empty(batch_size, dtype=np.float32)
 
