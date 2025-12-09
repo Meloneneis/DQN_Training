@@ -3,13 +3,17 @@ import platform
 import argparse
 import torch
 import numpy as np
+import yaml
 
 from action import ActionSet, get_action, get_continuous_action
 from sdc_wrapper import SDC_Wrapper
 from utils import get_state
 from model import DQN, ContinuousActionDQN
 
-def evaluate(env, new_actions = None, load_path='agent.pth', use_continuous=False):
+def evaluate(env, new_actions=None, load_path='agent.pth', use_continuous=False,
+             hidden_sizes=None, cnn_channels=None, cnn_kernels=None,
+             cnn_strides=None, final_spatial_size=6, activation='relu',
+             normalization='layer', use_dueling=False):
     """ Evaluate a trained model and compute your leaderboard scores
 
 	NO CHANGES SHOULD BE MADE TO THIS FUNCTION
@@ -20,12 +24,28 @@ def evaluate(env, new_actions = None, load_path='agent.pth', use_continuous=Fals
         environment to evaluate on
     load_path: str
         path to load the model (.pth) from
+    hidden_sizes: list
+        hidden layer sizes for the model
+    cnn_channels: list
+        CNN channel sizes
+    cnn_kernels: list
+        CNN kernel sizes
+    cnn_strides: list
+        CNN strides
+    final_spatial_size: int
+        final spatial size after CNN
+    activation: str
+        activation function
+    normalization: str
+        normalization type
+    use_dueling: bool
+        whether to use dueling architecture
     """
     episode_rewards = []
     action_manager = ActionSet()
 
     if new_actions is not None:
-        action_manager.set_actions ( new_actions )
+        action_manager.set_actions(new_actions)
 
     actions = action_manager.get_action_set()
     action_size = len(actions)
@@ -44,11 +64,30 @@ def evaluate(env, new_actions = None, load_path='agent.pth', use_continuous=Fals
              11111111, 99999999, 55555555, 77777777, 13579246,
              64827193, 19283746, 73829164, 48291637, 92837465,
              38291647, 73829156, 18273645, 92837461, 47382916]
-    # Build & load network
+
+    # Set default architecture if not provided
+    if hidden_sizes is None:
+        hidden_sizes = [1024, 512]
+    if cnn_channels is None:
+        cnn_channels = [32, 64, 128, 128]
+    if cnn_kernels is None:
+        cnn_kernels = [8, 4, 3, 3]
+    if cnn_strides is None:
+        cnn_strides = [4, 2, 1, 1]
+
+    # Build & load network (dropout_rate=0.0 for inference)
     if use_continuous:
-        policy_net = ContinuousActionDQN(3, device).to(device)  # 3D actions
+        policy_net = ContinuousActionDQN(3, device, hidden_sizes=hidden_sizes,
+                                        dropout_rate=0.0,
+                                        cnn_channels=cnn_channels, cnn_kernels=cnn_kernels,
+                                        cnn_strides=cnn_strides, final_spatial_size=final_spatial_size,
+                                        activation=activation, normalization=normalization).to(device)
     else:
-        policy_net = DQN(action_size, device).to(device)
+        policy_net = DQN(action_size, device, hidden_sizes=hidden_sizes, dropout_rate=0.0,
+                         cnn_channels=cnn_channels, cnn_kernels=cnn_kernels,
+                         cnn_strides=cnn_strides, final_spatial_size=final_spatial_size,
+                         activation=activation, normalization=normalization,
+                         use_dueling=use_dueling).to(device)
     checkpoint = torch.load(load_path, map_location=device)
     policy_net.load_state_dict(checkpoint)
     policy_net.eval()
@@ -83,30 +122,137 @@ def evaluate(env, new_actions = None, load_path='agent.pth', use_continuous=Fals
     print(' std score: %f' % np.std(np.array(episode_rewards)))
     print('---------------------------')
 
-def load_actions ( action_filename ):
+def get_action_set(config_name):
+    # Map config name to predefined action sets (same as in train_racing_sweep.py)
+    action_sets = {
+        'minimal_conservative': [
+            [0.0, 0.5, 0.0], [-0.5, 0.3, 0.0], [0.5, 0.3, 0.0],
+            [0.0, 1.0, 0.0], [0.0, 0.0, 0.5],
+        ],
+        'minimal_aggressive': [
+            [0.0, 1.0, 0.0], [-0.8, 0.8, 0.0], [0.8, 0.8, 0.0],
+            [-0.4, 0.6, 0.0], [0.4, 0.6, 0.0],
+        ],
+        'small_balanced': [
+            [0.0, 1.0, 0.0], [0.0, 0.5, 0.0], [-0.4, 0.7, 0.0],
+            [0.4, 0.7, 0.0], [-0.7, 0.4, 0.0], [0.7, 0.4, 0.0],
+            [0.0, 0.0, 0.6],
+        ],
+        'small_precision': [
+            [0.0, 0.8, 0.0], [-0.3, 0.8, 0.0], [0.3, 0.8, 0.0],
+            [-0.6, 0.5, 0.0], [0.6, 0.5, 0.0], [0.0, 0.0, 0.4],
+            [0.0, 0.0, 0.8],
+        ],
+        'medium_balanced': [
+            [0.0, 1.0, 0.0], [0.0, 0.5, 0.0], [-0.3, 0.8, 0.0],
+            [0.3, 0.8, 0.0], [-0.6, 0.6, 0.0], [0.6, 0.6, 0.0],
+            [-0.9, 0.3, 0.0], [0.9, 0.3, 0.0], [0.0, 0.0, 0.5],
+            [0.0, 0.0, 0.9],
+        ],
+        'medium_original': [
+            [-1.0, 0.4, 0.0], [-0.6, 0.6, 0.0], [-0.3, 0.8, 0.0],
+            [0.0, 1.0, 0.0], [0.0, 0.4, 0.0], [0.3, 0.8, 0.0],
+            [0.6, 0.6, 0.0], [1.0, 0.4, 0.0], [0.0, 0.0, 0.8],
+        ],
+        'large_precision': [
+            [0.0, 1.0, 0.0], [0.0, 0.7, 0.0], [0.0, 0.4, 0.0],
+            [-0.2, 0.9, 0.0], [0.2, 0.9, 0.0], [-0.5, 0.7, 0.0],
+            [0.5, 0.7, 0.0], [-0.8, 0.5, 0.0], [0.8, 0.5, 0.0],
+            [-1.0, 0.3, 0.0], [1.0, 0.3, 0.0], [0.0, 0.0, 0.6],
+        ],
+        'large_extended': [
+            [-1.0, 0.4, 0.0], [-0.6, 0.6, 0.0], [-0.3, 0.8, 0.0],
+            [0.0, 1.0, 0.0], [0.0, 0.4, 0.0], [0.3, 0.8, 0.0],
+            [0.6, 0.6, 0.0], [1.0, 0.4, 0.0], [0.0, 0.0, 0.8],
+            [-0.6, 0.0, 0.5], [0.6, 0.0, 0.5], [0.0, 0.0, 0.3],
+            [-0.4, 0.5, 0.0], [0.4, 0.5, 0.0], [0.0, 0.7, 0.0],
+        ],
+        'xlarge_full': [
+            [0.0, 1.0, 0.0], [0.0, 0.8, 0.0], [0.0, 0.5, 0.0],
+            [0.0, 0.3, 0.0], [-0.3, 0.8, 0.0], [-0.5, 0.6, 0.0],
+            [-0.8, 0.4, 0.0], [-1.0, 0.3, 0.0], [0.3, 0.8, 0.0],
+            [0.5, 0.6, 0.0], [0.8, 0.4, 0.0], [1.0, 0.3, 0.0],
+            [0.0, 0.0, 0.5], [0.0, 0.0, 0.8], [-0.5, 0.0, 0.6],
+            [0.5, 0.0, 0.6],
+        ],
+        'xlarge_hybrid_drift': [
+            [0.0, 1.0, 0.0], [0.0, 0.5, 0.0], [0.0, 0.0, 0.6],
+            [-0.2, 1.0, 0.0], [0.2, 1.0, 0.0], [-0.6, 0.7, 0.0],
+            [0.6, 0.7, 0.0], [-1.0, 0.3, 0.0], [1.0, 0.3, 0.0],
+            [-1.0, 0.0, 0.5], [1.0, 0.0, 0.5], [-0.5, 0.0, 0.5],
+            [0.5, 0.0, 0.5],
+        ],
+        'xlarge_aggressive_drifter': [
+            [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [-0.2, 1.0, 0.0],
+            [0.2, 1.0, 0.0], [-0.5, 0.8, 0.0], [0.5, 0.8, 0.0],
+            [-1.0, 0.9, 0.0], [1.0, 0.9, 0.0], [-1.0, 0.0, 0.8],
+            [1.0, 0.0, 0.8], [-0.5, 0.0, 0.5], [0.5, 0.0, 0.5],
+        ],
+    }
+    if config_name not in action_sets:
+        raise ValueError(f"Unknown action config: {config_name}")
+    return action_sets[config_name]
 
+
+def get_cnn_config(config_name):
+    # Map config name to full CNN architecture specs
+    config_map = {
+        'small_3layer': ([16, 32, 64], [8, 4, 3], [4, 2, 1], 8),
+        'medium_3layer': ([32, 64, 128], [8, 4, 3], [4, 2, 1], 8),
+        'large_3layer': ([64, 128, 256], [8, 4, 3], [4, 2, 1], 8),
+        'small_4layer': ([16, 32, 64, 64], [8, 4, 3, 3], [4, 2, 1, 1], 6),
+        'medium_4layer': ([32, 64, 128, 128], [8, 4, 3, 3], [4, 2, 1, 1], 6),
+        'large_4layer': ([64, 128, 256, 256], [8, 4, 3, 3], [4, 2, 1, 1], 6),
+        'xlarge_4layer': ([128, 256, 512, 512], [8, 4, 3, 3], [4, 2, 1, 1], 6),
+        'medium_5layer': ([32, 64, 128, 256, 256], [8, 4, 3, 3, 3], [4, 2, 1, 1, 1], 4),
+        'large_5layer': ([64, 128, 256, 512, 512], [8, 4, 3, 3, 3], [4, 2, 1, 1, 1], 4),
+    }
+    if config_name not in config_map:
+        raise ValueError(f"Unknown CNN config: {config_name}")
+    return config_map[config_name]
+
+
+def get_hidden_sizes(config_name):
+    # Map config name to list of hidden layer sizes
+    config_map = {
+        'small_2layer': [256, 128],
+        'medium_2layer': [512, 256],
+        'large_2layer': [1024, 512],
+        'xlarge_2layer': [2048, 1024],
+        'medium_3layer': [512, 256, 128],
+        'large_3layer': [1024, 512, 256],
+        'large_4layer': [1024, 512, 256, 128]
+    }
+    if config_name not in config_map:
+        raise ValueError(f"Unknown hidden layer config: {config_name}")
+    return config_map[config_name]
+
+
+def load_actions(action_filename):
     actions = []
-
-    with open ( action_filename ) as f:
-
+    with open(action_filename) as f:
         lines = f.readlines()
-
         for line in lines:
             action = []
             for tok in line.split():
-                action.append ( float ( tok ))
-            actions.append (action)
-
+                action.append(float(tok))
+            actions.append(action)
     return actions
 
+
+def load_config_from_yaml(config_path):
+    """Load model configuration from wandb config.yaml file"""
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    return config
+
 def main():
+    """
+    Evaluate a trained Deep Q-Learning agent
+    """
 
-    """ 
-    Evaluate a trained Deep Q-Learning agent 
-    """ 
-
-    print ("python version:\t{0}".format (platform.python_version()))
-    print ("gym version:\t{0}".format(gym.__version__))
+    print("python version:\t{0}".format(platform.python_version()))
+    print("gym version:\t{0}".format(gym.__version__))
 
     # it doesn't help that much.
     torch.manual_seed(0)
@@ -116,22 +262,77 @@ def main():
     # get args
     parser = argparse.ArgumentParser()
 
-    parser.add_argument ( '--action_filename', type=str, default = 'improved_actions.txt', help='a list of actions' )
-    parser.add_argument ( '--agent_name', type=str, default='agent_best')
-    parser.add_argument('--no_display', default=True, action="store_true", help='a flag indicating whether training/evaluation runs on the cluster')
-    parser.add_argument('--use_continuous', default=False, action="store_true", help='Use continuous actions (NAF) instead of discrete')
+    parser.add_argument('--action_filename', type=str, default='improved_actions.txt',
+                       help='a list of actions (only used if --config is not provided)')
+    parser.add_argument('--agent_name', type=str, default='lunar-sweep-7_best(2)',
+                       help='model name without .pth extension')
+    parser.add_argument('--no_display', default=True, action="store_true",
+                       help='a flag indicating whether training/evaluation runs on the cluster')
+    parser.add_argument('--use_continuous', default=False, action="store_true",
+                       help='Use continuous actions (NAF) instead of discrete')
+    parser.add_argument('--config', type=str, default="lunar_config.yaml",
+                       help='Path to wandb config.yaml file to load model architecture')
 
     args = parser.parse_args()
 
-    # load actions
-    actions = load_actions ( args.action_filename )
-    print ( "actions:\t\t", actions )
+    # Load configuration if provided
+    if args.config:
+        print(f"\nLoading configuration from: {args.config}")
+        config_data = load_config_from_yaml(args.config)
 
-    filename = args.agent_name +'.pth'
+        # Extract action configuration
+        action_config = config_data.get('action_config', {}).get('value', 'xlarge_hybrid_drift')
+        actions = get_action_set(action_config)
+        print(f"Action config: {action_config} -> {len(actions)} actions")
+
+        # Extract CNN configuration
+        cnn_config = config_data.get('cnn_config', {}).get('value', 'large_3layer')
+        cnn_channels, cnn_kernels, cnn_strides, final_spatial_size = get_cnn_config(cnn_config)
+        print(f"CNN config: {cnn_config} -> channels: {cnn_channels}")
+
+        # Extract hidden layer configuration
+        hidden_config = config_data.get('hidden_layer_config', {}).get('value', 'large_3layer')
+        hidden_sizes = get_hidden_sizes(hidden_config)
+        print(f"Hidden layer config: {hidden_config} -> sizes: {hidden_sizes}")
+
+        # Extract other hyperparameters
+        activation = config_data.get('activation', {}).get('value', 'relu')
+        normalization = config_data.get('normalization', {}).get('value', 'layer')
+        use_dueling = config_data.get('use_dueling', {}).get('value', False)
+
+        print(f"Activation: {activation}")
+        print(f"Normalization: {normalization}")
+        print(f"Use dueling: {use_dueling}")
+        print()
+    else:
+        # Use legacy action file loading
+        actions = load_actions(args.action_filename)
+        print("actions:\t\t", actions)
+
+        # Use default architecture parameters
+        cnn_channels = [32, 64, 128, 128]
+        cnn_kernels = [8, 4, 3, 3]
+        cnn_strides = [4, 2, 1, 1]
+        final_spatial_size = 6
+        hidden_sizes = [1024, 512]
+        activation = 'relu'
+        normalization = 'layer'
+        use_dueling = False
+
+    filename = args.agent_name + '.pth'
+    print(f"Loading model from: {filename}\n")
 
     render_mode = 'rgb_array' if args.no_display else 'human'
-    env = SDC_Wrapper(gym.make('CarRacing-v2', render_mode=render_mode), remove_score=True, return_linear_velocity=False)
-    evaluate(env, new_actions = actions, load_path = filename, use_continuous=args.use_continuous)
+    env = SDC_Wrapper(gym.make('CarRacing-v2', render_mode=render_mode),
+                     remove_score=True, return_linear_velocity=False)
+
+    evaluate(env, new_actions=actions, load_path=filename,
+            use_continuous=args.use_continuous,
+            hidden_sizes=hidden_sizes,
+            cnn_channels=cnn_channels, cnn_kernels=cnn_kernels,
+            cnn_strides=cnn_strides, final_spatial_size=final_spatial_size,
+            activation=activation, normalization=normalization,
+            use_dueling=use_dueling)
 
     env.close()
 
