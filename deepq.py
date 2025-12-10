@@ -538,8 +538,8 @@ def learn(env,
         #    checkpoint_name = f"{model_identifier}_{t}.pth"
         #    torch.save(policy_net.state_dict(), os.path.join(outdir, checkpoint_name))
 
-        # Validation check (skip first 40k steps, start at 50k)
-        if t >= 50000 and t % validation_freq == 0:
+        # Validation check (start at 100k steps)
+        if t >= 100000 and t % validation_freq == 0:
             print(f"\n{'='*60}")
             print(f"Running validation at timestep {t}...")
             print(f"{'='*60}")
