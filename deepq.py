@@ -271,12 +271,14 @@ def learn(env,
         print(f"{'='*60}")
         print(f"Teacher model: {warmup_teacher_path}")
         print(f"Warm-up steps: {warmup_steps}")
-        print(f"During warm-up:")
-        print(f"  - Teacher controls actions (greedy, no exploration)")
-        print(f"  - Teacher provides Q-value targets")
-        print(f"  - Student policy learns from expert demonstrations")
+        print(f"During warm-up (curriculum learning):")
+        print(f"  - Teacher greedy: 90% → 0% (linear decrease)")
+        print(f"  - Random (epsilon): 10% → {exploration_final_eps*100:.2f}% (linear decrease)")
+        print(f"  - Student greedy: 0% → ~{(1-0.9-exploration_final_eps)*100:.1f}% (linear increase)")
+        print(f"  - Teacher provides Q-value targets for all transitions")
+        print(f"  - Smooth transition from expert to autonomous")
         print(f"After {warmup_steps} steps:")
-        print(f"  - Student takes over with normal exploration")
+        print(f"  - Student takes over 100% with constant epsilon={exploration_final_eps*100:.2f}%")
         print(f"  - Student uses its own target network")
         print(f"  - Student keeps weights learned during warm-up")
         print(f"{'='*60}\n")
@@ -387,24 +389,57 @@ def learn(env,
 
         # Select action
         if use_continuous_actions:
-            progress = min(t / (exploration_fraction * total_timesteps), 1.0)
-            current_noise = 0.3 - (0.3 - 0.05) * progress
-
-            # During warmup, use teacher for actions; otherwise use student policy
+            # Curriculum learning: During warmup, three-way split
             if using_warmup and t < warmup_steps:
-                teacher_net.eval()
-                env_action = get_continuous_action(obs, teacher_net, exploration_noise=0.0, t=t)
+                # Teacher: 90% → 0%, Random: 10% → final_eps, Student: remaining
+                warmup_progress = t / warmup_steps
+                teacher_prob = 0.9 * (1.0 - warmup_progress)
+                epsilon_prob = 0.1 - (0.1 - exploration_final_eps) * warmup_progress  # Decays 10% → 3.76%
+                student_prob = 1.0 - teacher_prob - epsilon_prob
+
+                rand = np.random.random()
+                if rand < teacher_prob:
+                    # Teacher acts greedy
+                    teacher_net.eval()
+                    env_action = get_continuous_action(obs, teacher_net, exploration_noise=0.0, t=t)
+                elif rand < teacher_prob + student_prob:
+                    # Student acts greedy
+                    policy_net.eval()
+                    env_action = get_continuous_action(obs, policy_net, exploration_noise=0.0, t=t)
+                    policy_net.train()
+                else:
+                    # Random action (epsilon exploration)
+                    env_action = np.random.uniform(-1, 1, size=action_dim)
             else:
+                # After warmup: Constant epsilon (no decay)
+                constant_noise = exploration_final_eps * 0.3  # Scale to continuous range
                 policy_net.eval()
-                env_action = get_continuous_action(obs, policy_net, exploration_noise=current_noise, t=t)
+                env_action = get_continuous_action(obs, policy_net, exploration_noise=constant_noise, t=t)
                 policy_net.train()
             action_id = env_action  # For continuous, store the actual action
         else:
-            # During warmup, use teacher for greedy actions; otherwise use student policy with exploration
+            # Curriculum learning: During warmup, three-way split
             if using_warmup and t < warmup_steps:
-                env_action, action_id = get_action(obs, teacher_net, action_size, actions, 0.0, t, is_greedy=True)
+                # Teacher: 90% → 0%, Random: 10% → final_eps, Student: remaining
+                warmup_progress = t / warmup_steps
+                teacher_prob = 0.9 * (1.0 - warmup_progress)
+                epsilon_prob = 0.1 - (0.1 - exploration_final_eps) * warmup_progress  # Decays 10% → 3.76%
+                student_prob = 1.0 - teacher_prob - epsilon_prob
+
+                rand = np.random.random()
+                if rand < teacher_prob:
+                    # Teacher acts greedy
+                    env_action, action_id = get_action(obs, teacher_net, action_size, actions, 0.0, t, is_greedy=True)
+                elif rand < teacher_prob + student_prob:
+                    # Student acts greedy
+                    env_action, action_id = get_action(obs, policy_net, action_size, actions, 0.0, t, is_greedy=True)
+                else:
+                    # Random action (epsilon exploration)
+                    action_id = np.random.randint(0, action_size)
+                    env_action = actions[action_id]
             else:
-                env_action, action_id = get_action(obs, policy_net, action_size, actions, exploration, t, is_greedy=False)
+                # After warmup: Constant epsilon (no decay)
+                env_action, action_id = get_action(obs, policy_net, action_size, actions, exploration_final_eps, t, is_greedy=False)
 
         # TODO: if you want to implement the network associated with the continuous action set or the prioritized replay buffer, you need to reimplement the replay buffer.
 
