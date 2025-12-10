@@ -303,11 +303,9 @@ def learn(env,
         print(f"    Normalization: {warmup_teacher_arch['normalization']}")
         print(f"    Dueling: {warmup_teacher_arch['use_dueling']}\n")
 
-        # During warmup, target_net points to teacher
-        # We'll swap it later
-        target_net.load_state_dict(teacher_net.state_dict())
-    else:
-        target_net.load_state_dict(policy_net.state_dict())
+    # Always initialize target_net from policy_net (student architecture)
+    # During warmup, we'll use teacher_net for Q-targets instead of target_net
+    target_net.load_state_dict(policy_net.state_dict())
 
     target_net.eval()
 
@@ -422,10 +420,13 @@ def learn(env,
             episode_rewards.append(0.0)
 
         if t > learning_starts and t % train_freq == 0:
+            # Use teacher network during warmup, target network after
+            active_target_net = teacher_net if (using_warmup and t < warmup_steps) else target_net
+
             if use_continuous_actions:
-                loss = perform_qlearning_step_continuous(policy_net, target_net, optimizer, replay_buffer, batch_size, gamma, device, use_doubleqlearning, grad_clip=10.0)
+                loss = perform_qlearning_step_continuous(policy_net, active_target_net, optimizer, replay_buffer, batch_size, gamma, device, use_doubleqlearning, grad_clip=10.0)
             else:
-                loss = perform_qlearning_step(policy_net, target_net, optimizer, replay_buffer, batch_size, gamma, device, use_doubleqlearning, grad_clip=10.0)
+                loss = perform_qlearning_step(policy_net, active_target_net, optimizer, replay_buffer, batch_size, gamma, device, use_doubleqlearning, grad_clip=10.0)
             training_losses.append(loss)
 
             if scheduler is not None:
