@@ -1,0 +1,121 @@
+_wandb:
+    value:
+        cli_version: 0.23.1
+        e:
+            jzaoca43izu2y9svbtsjks6kcswrioin:
+                codePath: train_local.py
+                codePathLocal: train_local.py
+                cpu_count: 36
+                cpu_count_logical: 72
+                cudaVersion: "13.0"
+                disk:
+                    /:
+                        total: "17179869184"
+                        used: "7356424192"
+                email: lekevinvan@gmail.com
+                executable: /venv/sdc/bin/python
+                git:
+                    commit: 2a0e30e36a11dff8e082b386893a92e84be5cc47
+                    remote: https://github.com/meloneneis/DQN_Training.git
+                gpu: NVIDIA GeForce RTX 4070 SUPER
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ada
+                      cudaCores: 7168
+                      memoryTotal: "12878610432"
+                      name: NVIDIA GeForce RTX 4070 SUPER
+                      uuid: GPU-f14a3789-d2cf-6fe7-5fe8-829f5c092239
+                host: c8e687c0aee6
+                memory:
+                    total: "135018053632"
+                os: Linux-5.15.0-153-generic-x86_64-with-glibc2.10
+                program: train_local.py
+                python: CPython 3.8.10
+                root: /workspace/DQN_Training
+                startedAt: "2025-12-10T06:02:46.538256Z"
+                writerId: jzaoca43izu2y9svbtsjks6kcswrioin
+        m: []
+        python_version: 3.8.10
+        t:
+            "1":
+                - 1
+            "2":
+                - 1
+            "3":
+                - 2
+                - 3
+                - 13
+                - 15
+                - 16
+            "4": 3.8.10
+            "5": 0.23.1
+            "12": 0.23.1
+            "13": linux-x86_64
+action_config:
+    value: xlarge_aggressive_drifter
+action_repeat:
+    value: 4
+activation:
+    value: gelu
+batch_size:
+    value: 32
+buffer_size:
+    value: 250000
+cnn_channels:
+    value:
+        - 128
+        - 256
+        - 512
+        - 512
+cnn_config:
+    value: xlarge_4layer
+cnn_num_layers:
+    value: 4
+dropout_rate:
+    value: 0
+early_stopping_patience:
+    value: 4
+exploration_final_eps:
+    value: 0.03764828332400635
+exploration_fraction:
+    value: 0.22087886429795167
+gamma:
+    value: 0.9631823101450634
+hidden_layer_config:
+    value: medium_2layer
+hidden_sizes:
+    value:
+        - 512
+        - 256
+learning_starts:
+    value: 500
+lr:
+    value: 4.029835161496903e-05
+lr_scheduler:
+    value: none
+normalization:
+    value: none
+num_validation_seeds:
+    value: 50
+optimizer_type:
+    value: adam
+target_network_update_freq:
+    value: 2000
+total_timesteps:
+    value: 400000
+train_freq:
+    value: 1
+training_type:
+    value: local_with_warmup
+use_doubleqlearning:
+    value: true
+use_dueling:
+    value: true
+validation_freq:
+    value: 10000
+warmup_steps:
+    value: 20000
+warmup_teacher:
+    value: lunar-sweep-7_best.pth
+weight_decay:
+    value: 2.084006397885873e-05
