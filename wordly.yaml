@@ -1,0 +1,140 @@
+_wandb:
+    value:
+        cli_version: 0.23.1
+        e:
+            07g0hl51qn1jb7gohxqt24h01tytxgni:
+                args:
+                    - --action_config=xlarge_hybrid_drift
+                    - --action_repeat=3
+                    - --activation=silu
+                    - --batch_size=64
+                    - --buffer_size=150000
+                    - --cnn_config=medium_3layer
+                    - --dropout_rate=0
+                    - --exploration_final_eps=0.024768880547450408
+                    - --exploration_fraction=0.10500105770997512
+                    - --gamma=0.9873631878237032
+                    - --hidden_layer_config=large_4layer
+                    - --learning_starts=1000
+                    - --lr=2.021411493037793e-05
+                    - --lr_scheduler=cosine
+                    - --normalization=none
+                    - --optimizer_type=adam
+                    - --target_network_update_freq=2000
+                    - --total_timesteps=400000
+                    - --use_dueling=True
+                    - --weight_decay=3.2265646597375465e-05
+                codePath: train_racing_sweep.py
+                codePathLocal: train_racing_sweep.py
+                cpu_count: 24
+                cpu_count_logical: 32
+                cudaVersion: "13.0"
+                disk:
+                    /:
+                        total: "1022889029632"
+                        used: "929517105152"
+                email: lekevinvan@gmail.com
+                executable: C:\Users\mertb\anaconda3\envs\lecture6_4\python.exe
+                gpu: NVIDIA GeForce RTX 4090 Laptop GPU
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ada
+                      cudaCores: 9728
+                      memoryTotal: "17171480576"
+                      name: NVIDIA GeForce RTX 4090 Laptop GPU
+                      uuid: GPU-3fe9a699-c639-d2b3-ec04-8c3d8fb7cf53
+                host: MertBilgin
+                memory:
+                    total: "33980628992"
+                os: Windows-10-10.0.26200-SP0
+                program: C:\MyRepos\Self-Driving-Cars-Tubingen\exercise_03_reinforcement_learning\DQN_Training\train_racing_sweep.py
+                python: CPython 3.9.21
+                root: C:\MyRepos\Self-Driving-Cars-Tubingen\exercise_03_reinforcement_learning\DQN_Training
+                startedAt: "2025-12-08T20:58:07.047100Z"
+                writerId: 07g0hl51qn1jb7gohxqt24h01tytxgni
+        m: []
+        python_version: 3.9.21
+        t:
+            "1":
+                - 1
+            "2":
+                - 1
+            "3":
+                - 2
+                - 3
+                - 14
+            "4": 3.9.21
+            "5": 0.23.1
+            "8":
+                - 3
+            "12": 0.23.1
+            "13": windows-amd64
+action_config:
+    value: xlarge_hybrid_drift
+action_repeat:
+    value: 3
+action_space_size:
+    value: 13
+action_type:
+    value: discrete
+activation:
+    value: silu
+batch_size:
+    value: 64
+buffer_size:
+    value: 150000
+cnn_channels:
+    value:
+        - 32
+        - 64
+        - 128
+cnn_config:
+    value: medium_3layer
+cnn_num_layers:
+    value: 3
+dropout_rate:
+    value: 0
+early_stopping_patience:
+    value: 4
+exploration_final_eps:
+    value: 0.024768880547450408
+exploration_fraction:
+    value: 0.10500105770997512
+gamma:
+    value: 0.9873631878237032
+hidden_layer_config:
+    value: large_4layer
+hidden_sizes:
+    value:
+        - 1024
+        - 512
+        - 256
+        - 128
+learning_starts:
+    value: 1000
+lr:
+    value: 2.021411493037793e-05
+lr_scheduler:
+    value: cosine
+normalization:
+    value: none
+num_actions:
+    value: 13
+num_validation_seeds:
+    value: 20
+optimizer_type:
+    value: adam
+target_network_update_freq:
+    value: 2000
+total_timesteps:
+    value: 400000
+train_freq:
+    value: 1
+use_doubleqlearning:
+    value: true
+use_dueling:
+    value: true
+validation_freq:
+    value: 10000
+weight_decay:
+    value: 3.2265646597375465e-05

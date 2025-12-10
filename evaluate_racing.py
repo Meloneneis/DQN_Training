@@ -382,11 +382,11 @@ def main():
     # get args
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--agent_name', type=str, default="lunar-sweep-7_best(2)",
+    parser.add_argument('--agent_name', type=str, default="local_training_warmup_best",
                        help='model name without .pth extension (default: lunar-sweep-7_best)')
-    parser.add_argument('--config', type=str, default='lunar_config.yaml',
+    parser.add_argument('--config', type=str, default='config(2).yaml',
                        help='Path to config.yaml file (default: lunar_config.yaml). Use "auto" to auto-infer from checkpoint.')
-    parser.add_argument('--no_display', default=False, action="store_true",
+    parser.add_argument('--no_display', default=True, action="store_true",
                        help='a flag indicating whether training/evaluation runs on the cluster')
     parser.add_argument('--use_continuous', default=False, action="store_true",
                        help='Use continuous actions (NAF) instead of discrete')

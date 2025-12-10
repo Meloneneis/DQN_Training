@@ -1,0 +1,139 @@
+_wandb:
+    value:
+        cli_version: 0.23.1
+        e:
+            hojchazqh4mij1ozhbjvpc369awwhcwr:
+                args:
+                    - --action_config=large_precision
+                    - --action_repeat=3
+                    - --activation=gelu
+                    - --batch_size=32
+                    - --buffer_size=300000
+                    - --cnn_config=medium_4layer
+                    - --dropout_rate=0.013909465259649268
+                    - --exploration_final_eps=0.04428117634835242
+                    - --exploration_fraction=0.2465571373219292
+                    - --gamma=0.9571580602944928
+                    - --hidden_layer_config=medium_2layer
+                    - --learning_starts=1000
+                    - --lr=0.00010160921697902204
+                    - --lr_scheduler=exponential
+                    - --normalization=layer
+                    - --optimizer_type=adam
+                    - --target_network_update_freq=1500
+                    - --total_timesteps=400000
+                    - --use_dueling=True
+                    - --weight_decay=0.0004484914808534276
+                codePath: train_racing_sweep.py
+                codePathLocal: train_racing_sweep.py
+                cpu_count: 8
+                cpu_count_logical: 16
+                cudaVersion: "13.0"
+                disk:
+                    /:
+                        total: "999224053760"
+                        used: "243354255360"
+                email: lekevinvan@gmail.com
+                executable: C:\Users\yenon\miniconda3\envs\sdc\python.exe
+                gpu: NVIDIA GeForce RTX 3070 Ti Laptop GPU
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ampere
+                      cudaCores: 5888
+                      memoryTotal: "8589934592"
+                      name: NVIDIA GeForce RTX 3070 Ti Laptop GPU
+                      uuid: GPU-321e7960-a0c0-4fa7-046d-175974a66977
+                host: Bowneee
+                memory:
+                    total: "16366280704"
+                os: Windows-10-10.0.22631-SP0
+                program: train_racing_sweep.py
+                python: CPython 3.8.10
+                root: C:\Users\yenon\Documents\PythonProjects\DQN_Training
+                startedAt: "2025-12-07T09:16:25.657814Z"
+                writerId: hojchazqh4mij1ozhbjvpc369awwhcwr
+        m: []
+        python_version: 3.8.10
+        t:
+            "1":
+                - 1
+            "2":
+                - 1
+            "3":
+                - 2
+                - 3
+                - 14
+            "4": 3.8.10
+            "5": 0.23.1
+            "8":
+                - 3
+            "12": 0.23.1
+            "13": windows-amd64
+action_config:
+    value: large_precision
+action_repeat:
+    value: 3
+action_space_size:
+    value: 12
+action_type:
+    value: discrete
+activation:
+    value: gelu
+batch_size:
+    value: 32
+buffer_size:
+    value: 300000
+cnn_channels:
+    value:
+        - 32
+        - 64
+        - 128
+        - 128
+cnn_config:
+    value: medium_4layer
+cnn_num_layers:
+    value: 4
+dropout_rate:
+    value: 0.013909465259649268
+early_stopping_patience:
+    value: 4
+exploration_final_eps:
+    value: 0.04428117634835242
+exploration_fraction:
+    value: 0.2465571373219292
+gamma:
+    value: 0.9571580602944928
+hidden_layer_config:
+    value: medium_2layer
+hidden_sizes:
+    value:
+        - 512
+        - 256
+learning_starts:
+    value: 1000
+lr:
+    value: 0.00010160921697902204
+lr_scheduler:
+    value: exponential
+normalization:
+    value: layer
+num_actions:
+    value: 12
+num_validation_seeds:
+    value: 20
+optimizer_type:
+    value: adam
+target_network_update_freq:
+    value: 1500
+total_timesteps:
+    value: 400000
+train_freq:
+    value: 1
+use_doubleqlearning:
+    value: true
+use_dueling:
+    value: true
+validation_freq:
+    value: 10000
+weight_decay:
+    value: 0.0004484914808534276
