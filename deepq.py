@@ -107,7 +107,11 @@ def learn(env,
           normalization='layer',
           lr_scheduler='none',
           weight_decay=0.0,
-          use_dueling=False):
+          use_dueling=False,
+          warmup_teacher_path=None,
+          warmup_teacher_arch=None,
+          warmup_steps=0,
+          validation_seeds_list=None):
     """ Train a deep q-learning model.
     Parameters
     -------
@@ -256,7 +260,55 @@ def learn(env,
                          activation=activation, normalization=normalization,
                          use_dueling=use_dueling).to(device)
         print(f"\nUsing Discrete Action DQN (Dueling: {use_dueling})\n")
-    target_net.load_state_dict(policy_net.state_dict())
+
+    # Warm-up with teacher network
+    teacher_net = None
+    using_warmup = warmup_teacher_path is not None and warmup_steps > 0
+
+    if using_warmup:
+        print(f"\n{'='*60}")
+        print(f"WARM-UP MODE ENABLED")
+        print(f"{'='*60}")
+        print(f"Teacher model: {warmup_teacher_path}")
+        print(f"Warm-up steps: {warmup_steps}")
+        print(f"During warm-up, the teacher network will be used as the target")
+        print(f"After {warmup_steps} steps, normal target network updates resume")
+        print(f"{'='*60}\n")
+
+        # Load teacher network with teacher architecture
+        if warmup_teacher_arch is None:
+            raise ValueError("warmup_teacher_arch must be provided when using warmup")
+
+        teacher_net = DQN(action_size, device,
+                         hidden_sizes=warmup_teacher_arch['hidden_sizes'],
+                         dropout_rate=0.0,
+                         cnn_channels=warmup_teacher_arch['cnn_channels'],
+                         cnn_kernels=warmup_teacher_arch['cnn_kernels'],
+                         cnn_strides=warmup_teacher_arch['cnn_strides'],
+                         final_spatial_size=warmup_teacher_arch['final_spatial_size'],
+                         activation=warmup_teacher_arch['activation'],
+                         normalization=warmup_teacher_arch['normalization'],
+                         use_dueling=warmup_teacher_arch['use_dueling']).to(device)
+
+        # Load teacher weights
+        teacher_checkpoint = torch.load(warmup_teacher_path, map_location=device)
+        teacher_net.load_state_dict(teacher_checkpoint)
+        teacher_net.eval()
+
+        print(f"✓ Teacher network loaded successfully")
+        print(f"  Teacher architecture:")
+        print(f"    CNN: {warmup_teacher_arch['cnn_channels']}")
+        print(f"    Hidden: {warmup_teacher_arch['hidden_sizes']}")
+        print(f"    Activation: {warmup_teacher_arch['activation']}")
+        print(f"    Normalization: {warmup_teacher_arch['normalization']}")
+        print(f"    Dueling: {warmup_teacher_arch['use_dueling']}\n")
+
+        # During warmup, target_net points to teacher
+        # We'll swap it later
+        target_net.load_state_dict(teacher_net.state_dict())
+    else:
+        target_net.load_state_dict(policy_net.state_dict())
+
     target_net.eval()
 
     # Create replay buffer
@@ -302,19 +354,24 @@ def learn(env,
     obs = get_state(obs)
     start = time.time()
 
-    # Generate random validation seeds (different from test seeds)
-    # Test seeds: [10000019, 20000003, 30000001, 40000003, 50000017,
-    #              60000011, 70000027, 80000023, 90000049, 10000079]
-    np.random.seed(42)  # For reproducibility of validation seeds
-    validation_seeds = []
-    test_seeds = {10000019, 20000003, 30000001, 40000003, 50000017,
-                  60000011, 70000027, 80000023, 90000049, 10000079}
-    while len(validation_seeds) < num_validation_seeds:
-        seed = np.random.randint(1000000, 99999999)
-        if seed not in test_seeds and seed not in validation_seeds:
-            validation_seeds.append(seed)
-
-    print(f"\nValidation seeds: {validation_seeds}\n")
+    # Use provided validation seeds or generate random ones
+    if validation_seeds_list is not None:
+        validation_seeds = validation_seeds_list
+        print(f"\nUsing provided validation seeds ({len(validation_seeds)} seeds)")
+        print(f"Validation seeds: {validation_seeds[:10]}... (showing first 10)\n")
+    else:
+        # Generate random validation seeds (different from test seeds)
+        # Test seeds: [10000019, 20000003, 30000001, 40000003, 50000017,
+        #              60000011, 70000027, 80000023, 90000049, 10000079]
+        np.random.seed(42)  # For reproducibility of validation seeds
+        validation_seeds = []
+        test_seeds = {10000019, 20000003, 30000001, 40000003, 50000017,
+                      60000011, 70000027, 80000023, 90000049, 10000079}
+        while len(validation_seeds) < num_validation_seeds:
+            seed = np.random.randint(1000000, 99999999)
+            if seed not in test_seeds and seed not in validation_seeds:
+                validation_seeds.append(seed)
+        print(f"\nValidation seeds: {validation_seeds}\n")
 
     # Track best validation performance and early stopping
     best_val_reward = -float('inf')
@@ -382,8 +439,21 @@ def learn(env,
                 })
 
         # Update target network
+        # Handle warm-up transition
+        if using_warmup and t == warmup_steps:
+            print(f"\n{'='*60}")
+            print(f"WARM-UP COMPLETE at step {t}")
+            print(f"{'='*60}")
+            print(f"Switching from teacher network to own target network")
+            print(f"Copying policy network to target network...")
+            target_net.load_state_dict(policy_net.state_dict())
+            print(f"✓ Target network updated - resuming normal training")
+            print(f"{'='*60}\n")
+
+        # Regular target network updates (skip during warmup)
         if t > learning_starts and t % target_network_update_freq == 0:
-            update_target_net(policy_net, target_net)
+            if not using_warmup or t >= warmup_steps:
+                update_target_net(policy_net, target_net)
 
         if t % 1000 == 0:
             end = time.time()

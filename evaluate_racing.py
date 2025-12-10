@@ -76,20 +76,45 @@ def evaluate(env, new_actions=None, load_path='agent.pth', use_continuous=False,
         cnn_strides = [4, 2, 1, 1]
 
     # Build & load network (dropout_rate=0.0 for inference)
-    if use_continuous:
-        policy_net = ContinuousActionDQN(3, device, hidden_sizes=hidden_sizes,
-                                        dropout_rate=0.0,
-                                        cnn_channels=cnn_channels, cnn_kernels=cnn_kernels,
-                                        cnn_strides=cnn_strides, final_spatial_size=final_spatial_size,
-                                        activation=activation, normalization=normalization).to(device)
-    else:
-        policy_net = DQN(action_size, device, hidden_sizes=hidden_sizes, dropout_rate=0.0,
-                         cnn_channels=cnn_channels, cnn_kernels=cnn_kernels,
-                         cnn_strides=cnn_strides, final_spatial_size=final_spatial_size,
-                         activation=activation, normalization=normalization,
-                         use_dueling=use_dueling).to(device)
+    # Try different normalization/activation combinations if loading fails
     checkpoint = torch.load(load_path, map_location=device)
-    policy_net.load_state_dict(checkpoint)
+
+    combinations_to_try = [
+        (activation, normalization),
+        (activation, 'layer' if normalization == 'none' else 'none'),
+        ('relu', normalization),
+        ('silu', normalization),
+    ]
+
+    loaded = False
+    for act, norm in combinations_to_try:
+        try:
+            if use_continuous:
+                policy_net = ContinuousActionDQN(3, device, hidden_sizes=hidden_sizes,
+                                                dropout_rate=0.0,
+                                                cnn_channels=cnn_channels, cnn_kernels=cnn_kernels,
+                                                cnn_strides=cnn_strides, final_spatial_size=final_spatial_size,
+                                                activation=act, normalization=norm).to(device)
+            else:
+                policy_net = DQN(action_size, device, hidden_sizes=hidden_sizes, dropout_rate=0.0,
+                                 cnn_channels=cnn_channels, cnn_kernels=cnn_kernels,
+                                 cnn_strides=cnn_strides, final_spatial_size=final_spatial_size,
+                                 activation=act, normalization=norm,
+                                 use_dueling=use_dueling).to(device)
+
+            policy_net.load_state_dict(checkpoint)
+            print(f"Successfully loaded model with activation='{act}', normalization='{norm}'")
+            loaded = True
+            break
+        except RuntimeError as e:
+            if act == combinations_to_try[-1][0] and norm == combinations_to_try[-1][1]:
+                # Last attempt failed, raise the error
+                raise e
+            continue
+
+    if not loaded:
+        raise RuntimeError("Failed to load model with any activation/normalization combination")
+
     policy_net.eval()
 
     # Iterate over a number of evaluation episodes
@@ -228,23 +253,118 @@ def get_hidden_sizes(config_name):
     return config_map[config_name]
 
 
-def load_actions(action_filename):
-    actions = []
-    with open(action_filename) as f:
-        lines = f.readlines()
-        for line in lines:
-            action = []
-            for tok in line.split():
-                action.append(float(tok))
-            actions.append(action)
-    return actions
-
-
 def load_config_from_yaml(config_path):
     """Load model configuration from wandb config.yaml file"""
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
     return config
+
+
+def infer_architecture_from_checkpoint(checkpoint_path):
+    """Automatically infer model architecture from checkpoint file
+
+    Returns
+    -------
+    dict
+        Dictionary containing architecture parameters:
+        - cnn_channels: list of CNN channel sizes
+        - cnn_kernels: list of kernel sizes
+        - cnn_strides: list of strides
+        - final_spatial_size: final spatial dimension
+        - hidden_sizes: list of FC layer sizes
+        - action_size: number of actions
+        - use_dueling: whether model uses dueling architecture
+        - activation: activation function (default 'silu')
+        - normalization: normalization type ('layer' or 'none')
+    """
+    device = torch.device("cpu")  # Load to CPU for inspection
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+
+    # Infer CNN architecture
+    cnn_channels = []
+    num_cnn_layers = 0
+    for key in checkpoint.keys():
+        if key.startswith('conv_layers.') and key.endswith('.weight'):
+            layer_num = int(key.split('.')[1])
+            num_cnn_layers = max(num_cnn_layers, layer_num + 1)
+
+    for i in range(num_cnn_layers):
+        weight_shape = checkpoint[f'conv_layers.{i}.weight'].shape
+        cnn_channels.append(weight_shape[0])  # output channels
+
+    # Standard kernels and strides based on number of layers
+    if num_cnn_layers == 3:
+        cnn_kernels = [8, 4, 3]
+        cnn_strides = [4, 2, 1]
+        final_spatial_size = 8
+    elif num_cnn_layers == 4:
+        cnn_kernels = [8, 4, 3, 3]
+        cnn_strides = [4, 2, 1, 1]
+        final_spatial_size = 6
+    elif num_cnn_layers == 5:
+        cnn_kernels = [8, 4, 3, 3, 3]
+        cnn_strides = [4, 2, 1, 1, 1]
+        final_spatial_size = 4
+    else:
+        raise ValueError(f"Unsupported number of CNN layers: {num_cnn_layers}")
+
+    # Check if using dueling architecture
+    use_dueling = 'value_output.weight' in checkpoint
+
+    # Infer action size
+    if use_dueling:
+        action_size = checkpoint['advantage_output.weight'].shape[0]
+    else:
+        action_size = checkpoint['fc_output.weight'].shape[0]
+
+    # Infer hidden layer sizes
+    hidden_sizes = []
+    if use_dueling:
+        # Shared layer
+        if 'fc_shared.0.weight' in checkpoint:
+            hidden_sizes.append(checkpoint['fc_shared.0.weight'].shape[0])
+
+        # Value/Advantage streams (they should be the same size)
+        stream_idx = 0
+        while f'value_stream.{stream_idx}.weight' in checkpoint:
+            hidden_sizes.append(checkpoint[f'value_stream.{stream_idx}.weight'].shape[0])
+            stream_idx += 1
+    else:
+        # Standard DQN
+        fc_idx = 0
+        while f'fc_layers.{fc_idx}.weight' in checkpoint:
+            hidden_sizes.append(checkpoint[f'fc_layers.{fc_idx}.weight'].shape[0])
+            fc_idx += 1
+
+    # Try to infer normalization by checking if it's layer norm or none
+    # This is tricky - we'll try both and see which one works
+    normalization = 'none'  # Default guess
+
+    print(f"\n=== Auto-Inferred Architecture ===")
+    print(f"CNN Layers: {num_cnn_layers}")
+    print(f"CNN Channels: {cnn_channels}")
+    print(f"CNN Kernels: {cnn_kernels}")
+    print(f"CNN Strides: {cnn_strides}")
+    print(f"Final Spatial Size: {final_spatial_size}")
+    print(f"Hidden Sizes: {hidden_sizes}")
+    print(f"Action Size: {action_size}")
+    print(f"Use Dueling: {use_dueling}")
+    print(f"Normalization: trying 'none' first, will try 'layer' if that fails")
+    print(f"Activation: trying 'silu' first, will try others if that fails")
+    print(f"===================================\n")
+
+    return {
+        'cnn_channels': cnn_channels,
+        'cnn_kernels': cnn_kernels,
+        'cnn_strides': cnn_strides,
+        'final_spatial_size': final_spatial_size,
+        'hidden_sizes': hidden_sizes,
+        'action_size': action_size,
+        'use_dueling': use_dueling,
+        'activation': 'silu',  # Default, can't infer from checkpoint
+        'normalization': normalization  # Default guess
+    }
+
 
 def main():
     """
@@ -262,64 +382,82 @@ def main():
     # get args
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--action_filename', type=str, default='improved_actions.txt',
-                       help='a list of actions (only used if --config is not provided)')
-    parser.add_argument('--agent_name', type=str, default='lunar-sweep-7_best(2)',
-                       help='model name without .pth extension')
-    parser.add_argument('--no_display', default=True, action="store_true",
+    parser.add_argument('--agent_name', type=str, default="lunar-sweep-7_best(2)",
+                       help='model name without .pth extension (default: lunar-sweep-7_best)')
+    parser.add_argument('--config', type=str, default='lunar_config.yaml',
+                       help='Path to config.yaml file (default: lunar_config.yaml). Use "auto" to auto-infer from checkpoint.')
+    parser.add_argument('--no_display', default=False, action="store_true",
                        help='a flag indicating whether training/evaluation runs on the cluster')
     parser.add_argument('--use_continuous', default=False, action="store_true",
                        help='Use continuous actions (NAF) instead of discrete')
-    parser.add_argument('--config', type=str, default="lunar_config.yaml",
-                       help='Path to wandb config.yaml file to load model architecture')
 
     args = parser.parse_args()
 
-    # Load configuration if provided
-    if args.config:
+    filename = args.agent_name + '.pth'
+
+    # Determine whether to use config file or auto-inference
+    if args.config == 'auto':
+        # Auto-infer architecture from checkpoint
+        print(f"Auto-inferring architecture from checkpoint: {filename}")
+        arch = infer_architecture_from_checkpoint(filename)
+
+        # Build action set based on inferred action size
+        action_size_to_config = {
+            5: 'minimal_conservative',
+            7: 'small_balanced',
+            9: 'medium_original',
+            10: 'medium_balanced',
+            12: 'xlarge_aggressive_drifter',
+            13: 'xlarge_hybrid_drift',
+            15: 'large_extended',
+            16: 'xlarge_full',
+        }
+
+        action_config = action_size_to_config.get(arch['action_size'])
+        if action_config is None:
+            raise ValueError(f"Cannot infer action config for {arch['action_size']} actions.")
+
+        actions = get_action_set(action_config)
+        print(f"Inferred action config: {action_config} -> {len(actions)} actions")
+
+        cnn_channels = arch['cnn_channels']
+        cnn_kernels = arch['cnn_kernels']
+        cnn_strides = arch['cnn_strides']
+        final_spatial_size = arch['final_spatial_size']
+        hidden_sizes = arch['hidden_sizes']
+        use_dueling = arch['use_dueling']
+        activation = arch['activation']
+        normalization = arch['normalization']
+    else:
+        # Load from config file
         print(f"\nLoading configuration from: {args.config}")
         config_data = load_config_from_yaml(args.config)
 
         # Extract action configuration
-        action_config = config_data.get('action_config', {}).get('value', 'xlarge_hybrid_drift')
+        action_config = config_data.get('action_config', {}).get('value', 'xlarge_aggressive_drifter')
         actions = get_action_set(action_config)
         print(f"Action config: {action_config} -> {len(actions)} actions")
 
         # Extract CNN configuration
-        cnn_config = config_data.get('cnn_config', {}).get('value', 'large_3layer')
+        cnn_config = config_data.get('cnn_config', {}).get('value', 'large_4layer')
         cnn_channels, cnn_kernels, cnn_strides, final_spatial_size = get_cnn_config(cnn_config)
         print(f"CNN config: {cnn_config} -> channels: {cnn_channels}")
 
         # Extract hidden layer configuration
-        hidden_config = config_data.get('hidden_layer_config', {}).get('value', 'large_3layer')
+        hidden_config = config_data.get('hidden_layer_config', {}).get('value', 'medium_2layer')
         hidden_sizes = get_hidden_sizes(hidden_config)
         print(f"Hidden layer config: {hidden_config} -> sizes: {hidden_sizes}")
 
         # Extract other hyperparameters
-        activation = config_data.get('activation', {}).get('value', 'relu')
-        normalization = config_data.get('normalization', {}).get('value', 'layer')
-        use_dueling = config_data.get('use_dueling', {}).get('value', False)
+        activation = config_data.get('activation', {}).get('value', 'silu')
+        normalization = config_data.get('normalization', {}).get('value', 'none')
+        use_dueling = config_data.get('use_dueling', {}).get('value', True)
 
         print(f"Activation: {activation}")
         print(f"Normalization: {normalization}")
         print(f"Use dueling: {use_dueling}")
         print()
-    else:
-        # Use legacy action file loading
-        actions = load_actions(args.action_filename)
-        print("actions:\t\t", actions)
 
-        # Use default architecture parameters
-        cnn_channels = [32, 64, 128, 128]
-        cnn_kernels = [8, 4, 3, 3]
-        cnn_strides = [4, 2, 1, 1]
-        final_spatial_size = 6
-        hidden_sizes = [1024, 512]
-        activation = 'relu'
-        normalization = 'layer'
-        use_dueling = False
-
-    filename = args.agent_name + '.pth'
     print(f"Loading model from: {filename}\n")
 
     render_mode = 'rgb_array' if args.no_display else 'human'
