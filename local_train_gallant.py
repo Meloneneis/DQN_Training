@@ -34,7 +34,7 @@ def get_action_set(config_name):
 def get_cnn_config(config_name):
     # Map config name to full CNN architecture specs
     config_map = {
-        'large_4layer': ([64, 128, 256, 256], [8, 4, 3, 3], [4, 2, 1, 1], 6),
+        'xlarge_4layer': ([128, 256, 512, 512], [8, 4, 3, 3], [4, 2, 1, 1], 6),
     }
     return config_map[config_name]
 
@@ -59,7 +59,7 @@ def main():
     activation = 'gelu'
     batch_size = 32
     buffer_size = 200000
-    cnn_config = 'large_4layer'
+    cnn_config = 'xlarge_4layer'
     dropout_rate = 0
     early_stopping_patience = 5
     exploration_final_eps = 0.035
