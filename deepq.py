@@ -439,7 +439,13 @@ def learn(env,
                     env_action = actions[action_id]
             else:
                 # After warmup: Constant epsilon (no decay)
-                env_action, action_id = get_action(obs, policy_net, action_size, actions, exploration_final_eps, t, is_greedy=False)
+                if np.random.random() < exploration_final_eps:
+                    # Random action
+                    action_id = np.random.randint(0, action_size)
+                    env_action = actions[action_id]
+                else:
+                    # Greedy action
+                    env_action, action_id = get_action(obs, policy_net, action_size, actions, 0.0, t, is_greedy=True)
 
         # TODO: if you want to implement the network associated with the continuous action set or the prioritized replay buffer, you need to reimplement the replay buffer.
 
@@ -526,8 +532,8 @@ def learn(env,
         #    checkpoint_name = f"{model_identifier}_{t}.pth"
         #    torch.save(policy_net.state_dict(), os.path.join(outdir, checkpoint_name))
 
-        # Validation check
-        if t > learning_starts and t % validation_freq == 0:
+        # Validation check (skip first 40k steps, start at 50k)
+        if t >= 50000 and t % validation_freq == 0:
             print(f"\n{'='*60}")
             print(f"Running validation at timestep {t}...")
             print(f"{'='*60}")
