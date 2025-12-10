@@ -120,7 +120,7 @@ def main():
     os.makedirs(outdir, exist_ok=True)
 
     # Initialize wandb with custom run name
-    wandb_project = "car_racing_RL_local"
+    wandb_project = "THE_FINAL_COUNTDOWN"
     wandb_run_name = f"wordly-student-wordly-teacher-large5-large2-gelu-60k-warmup"
 
     print(f"\n🔗 Initializing wandb...")
