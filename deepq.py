@@ -271,8 +271,14 @@ def learn(env,
         print(f"{'='*60}")
         print(f"Teacher model: {warmup_teacher_path}")
         print(f"Warm-up steps: {warmup_steps}")
-        print(f"During warm-up, the teacher network will be used as the target")
-        print(f"After {warmup_steps} steps, normal target network updates resume")
+        print(f"During warm-up:")
+        print(f"  - Teacher controls actions (greedy, no exploration)")
+        print(f"  - Teacher provides Q-value targets")
+        print(f"  - Student policy learns from expert demonstrations")
+        print(f"After {warmup_steps} steps:")
+        print(f"  - Student takes over with normal exploration")
+        print(f"  - Student uses its own target network")
+        print(f"  - Student keeps weights learned during warm-up")
         print(f"{'='*60}\n")
 
         # Load teacher network with teacher architecture
@@ -384,12 +390,21 @@ def learn(env,
             progress = min(t / (exploration_fraction * total_timesteps), 1.0)
             current_noise = 0.3 - (0.3 - 0.05) * progress
 
-            policy_net.eval()
-            env_action = get_continuous_action(obs, policy_net, exploration_noise=current_noise, t=t)
-            policy_net.train()
+            # During warmup, use teacher for actions; otherwise use student policy
+            if using_warmup and t < warmup_steps:
+                teacher_net.eval()
+                env_action = get_continuous_action(obs, teacher_net, exploration_noise=0.0, t=t)
+            else:
+                policy_net.eval()
+                env_action = get_continuous_action(obs, policy_net, exploration_noise=current_noise, t=t)
+                policy_net.train()
             action_id = env_action  # For continuous, store the actual action
         else:
-            env_action, action_id = get_action(obs, policy_net, action_size, actions, exploration, t, is_greedy=False)
+            # During warmup, use teacher for greedy actions; otherwise use student policy with exploration
+            if using_warmup and t < warmup_steps:
+                env_action, action_id = get_action(obs, teacher_net, action_size, actions, 0.0, t, is_greedy=True)
+            else:
+                env_action, action_id = get_action(obs, policy_net, action_size, actions, exploration, t, is_greedy=False)
 
         # TODO: if you want to implement the network associated with the continuous action set or the prioritized replay buffer, you need to reimplement the replay buffer.
 

@@ -90,7 +90,7 @@ def main():
 
     # Warm-up configuration
     warmup_teacher_path = 'lunar-sweep-7_best.pth'
-    warmup_steps = 10000
+    warmup_steps = 20000
     warmup_teacher_arch = {
         'cnn_channels': [64, 128, 256, 256],
         'cnn_kernels': [8, 4, 3, 3],
