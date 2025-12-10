@@ -18,7 +18,7 @@ class DQN(nn.Module):
         """
         super().__init__()
 
-        self.device = device
+        self.device = device 
         self.action_size = action_size
         self.use_dueling = use_dueling
 
@@ -29,29 +29,29 @@ class DQN(nn.Module):
             self.act = F.relu
 
         # CNN layers
-        self.conv1 = nn.Conv2d(3, 128, kernel_size = 8, stride = 4)
-        self.conv2 = nn.Conv2d(128, 256, kernel_size = 4, stride = 2)
-        self.conv3 = nn.Conv2d(256, 512, kernel_size = 3, stride = 1)
-        self.conv4 = nn.Conv2d(512, 512, kernel_size = 3, stride = 1)
+        self.conv1 = nn.Conv2d(3, 128, kernel_size=8, stride=4)
+        self.conv2 = nn.Conv2d(128, 256, kernel_size=4, stride=2)
+        self.conv3 = nn.Conv2d(256, 512, kernel_size=3, stride=1)
+        self.conv4 = nn.Conv2d(512, 512, kernel_size=3, stride=1)
 
         self.conv_output_size = 512 * 6 * 6
 
         self.sensor_input_size = 7
 
-        # First FC layer (shared)
-        self.fc1 = nn.Linear(self.conv_output_size + self.sensor_input_size, 512)
+        # First FC layer (shared) - pretty uses 1024
+        self.fc1 = nn.Linear(self.conv_output_size + self.sensor_input_size, 1024)
 
         if use_dueling:
             # Dueling DQN: separate streams after fc1
-            self.value_fc = nn.Linear(512, 256)
-            self.value_stream = nn.Linear(256, 1)
+            self.value_fc = nn.Linear(1024, 512)
+            self.value_stream = nn.Linear(512, 1)
 
-            self.advantage_fc = nn.Linear(512, 256)
-            self.advantage_stream = nn.Linear(256, self.action_size)
+            self.advantage_fc = nn.Linear(1024, 512)
+            self.advantage_stream = nn.Linear(512, self.action_size)
         else:
             # Standard DQN
-            self.fc2 = nn.Linear(512, 256)
-            self.fc3 = nn.Linear(256, self.action_size)
+            self.fc2 = nn.Linear(1024, 512)
+            self.fc3 = nn.Linear(512, self.action_size)
 
         # TODO: Create network
 
@@ -64,7 +64,7 @@ class DQN(nn.Module):
         Returns
         ----------
         torch.Tensor
-            Q-values  
+            Q-values
         """
 
         if not isinstance(observation, torch.Tensor):
@@ -74,22 +74,33 @@ class DQN(nn.Module):
 
         if observation.dim() == 3:
             observation = observation.unsqueeze(0)
-        
+
         batch_size = observation.shape[0]
-        
+
         if observation.shape[-1] != 3:
             # If shape is (batch, channels, height, width), permute to (batch, height, width, channels)
             if observation.shape[1] == 3:
                 observation = observation.permute(0, 2, 3, 1)
-        
+
         # Permute from (batch, height, width, channels) to (batch, channels, height, width)
         observation = observation.permute(0, 3, 1, 2)
 
         # CNN forward
-        x = self.act(self.conv1(observation))
-        x = self.act(self.conv2(x))
-        x = self.act(self.conv3(x))
-        x = self.act(self.conv4(x))
+        x = self.conv1(observation)
+        x = F.layer_norm(x, x.shape[1:])
+        x = self.act(x)
+
+        x = self.conv2(x)
+        x = F.layer_norm(x, x.shape[1:])
+        x = self.act(x)
+
+        x = self.conv3(x)
+        x = F.layer_norm(x, x.shape[1:])
+        x = self.act(x)
+
+        x = self.conv4(x)
+        x = F.layer_norm(x, x.shape[1:])
+        x = self.act(x)
 
         x = x.reshape(batch_size, -1)
 
