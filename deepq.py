@@ -272,9 +272,9 @@ def learn(env,
         print(f"Teacher model: {warmup_teacher_path}")
         print(f"Warm-up steps: {warmup_steps}")
         print(f"During warm-up (curriculum learning):")
-        print(f"  - Teacher greedy: 90% → 0% (linear decrease)")
-        print(f"  - Random (epsilon): 10% → {exploration_final_eps*100:.2f}% (linear decrease)")
-        print(f"  - Student greedy: 0% → ~{(1-0.9-exploration_final_eps)*100:.1f}% (linear increase)")
+        print(f"  - Teacher greedy: {(1-exploration_final_eps)*100:.1f}% → 0% (linear decrease)")
+        print(f"  - Student greedy: 0% → {(1-exploration_final_eps)*100:.1f}% (linear increase)")
+        print(f"  - Random (epsilon): {exploration_final_eps*100:.2f}% constant throughout entire run")
         print(f"  - Teacher provides Q-value targets for all transitions")
         print(f"  - Smooth transition from expert to autonomous")
         print(f"After {warmup_steps} steps:")
@@ -391,11 +391,14 @@ def learn(env,
         if use_continuous_actions:
             # Curriculum learning: During warmup, three-way split
             if using_warmup and t < warmup_steps:
-                # Teacher: 90% → 0%, Random: 10% → final_eps, Student: remaining
+                # Random stays constant at exploration_final_eps throughout entire run
                 warmup_progress = t / warmup_steps
-                teacher_prob = 0.9 * (1.0 - warmup_progress)
-                epsilon_prob = 0.1 - (0.1 - exploration_final_eps) * warmup_progress  # Decays 10% → 3.76%
-                student_prob = 1.0 - teacher_prob - epsilon_prob
+                epsilon_prob = exploration_final_eps  # Constant (e.g., 3.5%)
+
+                # Greedy portion (1 - epsilon) is split between teacher and student
+                greedy_budget = 1.0 - exploration_final_eps
+                teacher_prob = greedy_budget * (1.0 - warmup_progress)  # 96.5% → 0%
+                student_prob = greedy_budget * warmup_progress           # 0% → 96.5%
 
                 rand = np.random.random()
                 if rand < teacher_prob:
@@ -420,11 +423,14 @@ def learn(env,
         else:
             # Curriculum learning: During warmup, three-way split
             if using_warmup and t < warmup_steps:
-                # Teacher: 90% → 0%, Random: 10% → final_eps, Student: remaining
+                # Random stays constant at exploration_final_eps throughout entire run
                 warmup_progress = t / warmup_steps
-                teacher_prob = 0.9 * (1.0 - warmup_progress)
-                epsilon_prob = 0.1 - (0.1 - exploration_final_eps) * warmup_progress  # Decays 10% → 3.76%
-                student_prob = 1.0 - teacher_prob - epsilon_prob
+                epsilon_prob = exploration_final_eps  # Constant (e.g., 3.5%)
+
+                # Greedy portion (1 - epsilon) is split between teacher and student
+                greedy_budget = 1.0 - exploration_final_eps
+                teacher_prob = greedy_budget * (1.0 - warmup_progress)  # 96.5% → 0%
+                student_prob = greedy_budget * warmup_progress           # 0% → 96.5%
 
                 rand = np.random.random()
                 if rand < teacher_prob:
